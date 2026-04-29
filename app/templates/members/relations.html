@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}关系维护{% endblock %}
+{% block content %}
+<div class="d-flex align-items-start justify-content-between gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ member.name }} 的关系维护</h1>
+    <div class="text-secondary">成员 ID：{{ member.id }}，第 {{ member.generation_no }} 代</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('genealogies.members', id=member.genealogy_id) }}">返回成员列表</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <section class="panel">
+      <h2 class="h5">添加父母</h2>
+      <form method="post" class="row g-2">
+        <input type="hidden" name="action" value="add_parent">
+        <div class="col-sm-7">
+          <select class="form-select" name="parent_member_id" required>
+            <option value="">选择父母成员</option>
+            {% for candidate in candidates %}
+              <option value="{{ candidate.id }}">#{{ candidate.id }} {{ candidate.name }}（第 {{ candidate.generation_no }} 代）</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-3">
+          <select class="form-select" name="parent_role">
+            <option value="father">父亲</option>
+            <option value="mother">母亲</option>
+          </select>
+        </div>
+        <div class="col-sm-2">
+          <button class="btn btn-primary w-100" type="submit">添加</button>
+        </div>
+      </form>
+
+      <div class="relation-list mt-3">
+        {% for relation in parent_relations %}
+          <div class="relation-row">
+            <span>{{ "父亲" if relation.parent_role == "father" else "母亲" }}：{{ relation.parent.name }} #{{ relation.parent.id }}</span>
+            <form method="post">
+              <input type="hidden" name="action" value="delete_relation">
+              <input type="hidden" name="relation_id" value="{{ relation.id }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit">移除</button>
+            </form>
+          </div>
+        {% else %}
+          <div class="text-secondary small">暂无父母关系。</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <div class="col-lg-6">
+    <section class="panel">
+      <h2 class="h5">添加子女</h2>
+      <form method="post" class="row g-2">
+        <input type="hidden" name="action" value="add_child">
+        <div class="col-sm-7">
+          <select class="form-select" name="child_member_id" required>
+            <option value="">选择子女成员</option>
+            {% for candidate in candidates %}
+              <option value="{{ candidate.id }}">#{{ candidate.id }} {{ candidate.name }}（第 {{ candidate.generation_no }} 代）</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-3">
+          <select class="form-select" name="parent_role">
+            <option value="father">本人为父亲</option>
+            <option value="mother">本人为母亲</option>
+          </select>
+        </div>
+        <div class="col-sm-2">
+          <button class="btn btn-primary w-100" type="submit">添加</button>
+        </div>
+      </form>
+
+      <div class="relation-list mt-3">
+        {% for relation in child_relations %}
+          <div class="relation-row">
+            <span>{{ relation.child.name }} #{{ relation.child.id }}（{{ "父亲" if relation.parent_role == "father" else "母亲" }}）</span>
+            <form method="post">
+              <input type="hidden" name="action" value="delete_relation">
+              <input type="hidden" name="relation_id" value="{{ relation.id }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit">移除</button>
+            </form>
+          </div>
+        {% else %}
+          <div class="text-secondary small">暂无子女关系。</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <div class="col-lg-12">
+    <section class="panel">
+      <h2 class="h5">婚姻关系</h2>
+      <form method="post" class="row g-2">
+        <input type="hidden" name="action" value="add_marriage">
+        <div class="col-md-5">
+          <select class="form-select" name="spouse_member_id" required>
+            <option value="">选择配偶成员</option>
+            {% for candidate in candidates %}
+              <option value="{{ candidate.id }}">#{{ candidate.id }} {{ candidate.name }}（第 {{ candidate.generation_no }} 代）</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <input class="form-control" name="married_year" type="number" placeholder="结婚年">
+        </div>
+        <div class="col-md-2">
+          <input class="form-control" name="ended_year" type="number" placeholder="结束年">
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-primary w-100" type="submit">添加婚姻</button>
+        </div>
+      </form>
+
+      <div class="relation-list mt-3">
+        {% for marriage in marriages %}
+          {% set spouse = marriage.spouse2 if marriage.spouse1_member_id == member.id else marriage.spouse1 %}
+          <div class="relation-row">
+            <span>
+              配偶：{{ spouse.name }} #{{ spouse.id }}
+              {% if marriage.married_year %}，{{ marriage.married_year }} 年结婚{% endif %}
+              {% if marriage.ended_year %}，{{ marriage.ended_year }} 年结束{% endif %}
+            </span>
+            <form method="post">
+              <input type="hidden" name="action" value="delete_marriage">
+              <input type="hidden" name="marriage_id" value="{{ marriage.id }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit">移除</button>
+            </form>
+          </div>
+        {% else %}
+          <div class="text-secondary small">暂无婚姻关系。</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS parent_child_relations (
     child_member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
     parent_role VARCHAR(10) NOT NULL,
     CONSTRAINT uq_parent_child UNIQUE (parent_member_id, child_member_id),
+    CONSTRAINT uq_child_parent_role UNIQUE (child_member_id, parent_role),
     CONSTRAINT ck_parent_not_child CHECK (parent_member_id <> child_member_id),
     CONSTRAINT ck_parent_role CHECK (parent_role IN ('father', 'mother'))
 );

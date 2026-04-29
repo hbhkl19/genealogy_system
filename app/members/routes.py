@@ -1,5 +1,6 @@
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 
 from app.extensions import db
@@ -7,6 +8,22 @@ from app.models import Genealogy, Marriage, Member, ParentChildRelation, accessi
 
 
 bp = Blueprint("members", __name__)
+
+
+def parse_optional_int(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    return int(value)
+
+
+def update_member_from_form(member):
+    member.name = request.form.get("name", "").strip()
+    member.gender = request.form.get("gender", "unknown")
+    member.birth_year = parse_optional_int(request.form.get("birth_year"))
+    member.death_year = parse_optional_int(request.form.get("death_year"))
+    member.biography = request.form.get("biography", "").strip()
+    member.generation_no = parse_optional_int(request.form.get("generation_no")) or 1
 
 
 def get_member(member_id):
@@ -19,6 +36,113 @@ def get_member(member_id):
     return member
 
 
+def get_genealogy_member(genealogy_id, member_id):
+    if member_id is None:
+        return None
+    member = db.session.get(Member, member_id)
+    if member is None or member.genealogy_id != genealogy_id:
+        return None
+    return member
+
+
+def validate_parent_child(genealogy_id, parent_id, child_id, parent_role):
+    parent = get_genealogy_member(genealogy_id, parent_id)
+    child = get_genealogy_member(genealogy_id, child_id)
+    if parent is None or child is None:
+        return "父母和子女必须属于同一个族谱。"
+    if parent.id == child.id:
+        return "成员不能成为自己的父母或子女。"
+    if parent_role not in {"father", "mother"}:
+        return "父母角色只能是 father 或 mother。"
+    if parent.birth_year and child.birth_year and parent.birth_year >= child.birth_year:
+        return "父母出生年必须早于子女出生年。"
+    if parent.generation_no >= child.generation_no:
+        return "父母代数必须小于子女代数。"
+    existing_role = ParentChildRelation.query.filter_by(
+        child_member_id=child.id,
+        parent_role=parent_role,
+    ).first()
+    if existing_role and existing_role.parent_member_id != parent.id:
+        return "同一成员最多只能有一个父亲和一个母亲。"
+    return None
+
+
+def add_parent_child(genealogy_id, parent_id, child_id, parent_role):
+    error = validate_parent_child(genealogy_id, parent_id, child_id, parent_role)
+    if error:
+        flash(error, "warning")
+        return False
+
+    exists = ParentChildRelation.query.filter_by(
+        parent_member_id=parent_id,
+        child_member_id=child_id,
+    ).first()
+    if exists:
+        flash("该父母子女关系已经存在。", "info")
+        return False
+
+    db.session.add(
+        ParentChildRelation(
+            genealogy_id=genealogy_id,
+            parent_member_id=parent_id,
+            child_member_id=child_id,
+            parent_role=parent_role,
+        )
+    )
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("关系保存失败，请检查是否违反唯一约束。", "danger")
+        return False
+    flash("父母子女关系已保存。", "success")
+    return True
+
+
+def add_marriage(genealogy_id, member_id, spouse_id):
+    member = get_genealogy_member(genealogy_id, member_id)
+    spouse = get_genealogy_member(genealogy_id, spouse_id)
+    if member is None or spouse is None:
+        flash("配偶双方必须属于同一个族谱。", "warning")
+        return False
+    if member.id == spouse.id:
+        flash("成员不能与自己成婚。", "warning")
+        return False
+
+    spouse1_id, spouse2_id = sorted([member.id, spouse.id])
+    exists = Marriage.query.filter_by(
+        spouse1_member_id=spouse1_id,
+        spouse2_member_id=spouse2_id,
+    ).first()
+    if exists:
+        flash("该婚姻关系已经存在。", "info")
+        return False
+
+    married_year = parse_optional_int(request.form.get("married_year"))
+    ended_year = parse_optional_int(request.form.get("ended_year"))
+    if married_year and ended_year and ended_year < married_year:
+        flash("婚姻结束年份不能早于结婚年份。", "warning")
+        return False
+
+    db.session.add(
+        Marriage(
+            genealogy_id=genealogy_id,
+            spouse1_member_id=spouse1_id,
+            spouse2_member_id=spouse2_id,
+            married_year=married_year,
+            ended_year=ended_year,
+        )
+    )
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("婚姻关系保存失败，请检查是否重复。", "danger")
+        return False
+    flash("婚姻关系已保存。", "success")
+    return True
+
+
 @bp.route("/genealogies/<int:genealogy_id>/members/new", methods=["GET", "POST"])
 @login_required
 def create(genealogy_id):
@@ -29,13 +153,8 @@ def create(genealogy_id):
     if request.method == "POST":
         member = Member(
             genealogy_id=genealogy_id,
-            name=request.form.get("name", "").strip(),
-            gender=request.form.get("gender", "unknown"),
-            birth_year=request.form.get("birth_year") or None,
-            death_year=request.form.get("death_year") or None,
-            biography=request.form.get("biography", "").strip(),
-            generation_no=request.form.get("generation_no") or 1,
         )
+        update_member_from_form(member)
         if not member.name:
             flash("成员姓名不能为空。", "warning")
             return render_template("members/form.html", genealogy=genealogy, member=member)
@@ -45,6 +164,104 @@ def create(genealogy_id):
         return redirect(url_for("genealogies.members", id=genealogy_id))
 
     return render_template("members/form.html", genealogy=genealogy, member=None)
+
+
+@bp.route("/members/<int:id>/edit", methods=["GET", "POST"])
+@login_required
+def edit(id):
+    member = get_member(id)
+    genealogy = db.session.get(Genealogy, member.genealogy_id)
+
+    if request.method == "POST":
+        update_member_from_form(member)
+        if not member.name:
+            flash("成员姓名不能为空。", "warning")
+            return render_template("members/form.html", genealogy=genealogy, member=member)
+        db.session.commit()
+        flash("成员信息已更新。", "success")
+        return redirect(url_for("genealogies.members", id=member.genealogy_id))
+
+    return render_template("members/form.html", genealogy=genealogy, member=member)
+
+
+@bp.route("/members/<int:id>/delete", methods=["POST"])
+@login_required
+def delete(id):
+    member = get_member(id)
+    genealogy_id = member.genealogy_id
+    db.session.delete(member)
+    db.session.commit()
+    flash("成员已删除，相关父母子女和婚姻关系已同步移除。", "success")
+    return redirect(url_for("genealogies.members", id=genealogy_id))
+
+
+@bp.route("/members/<int:id>/relations", methods=["GET", "POST"])
+@login_required
+def relations(id):
+    member = get_member(id)
+    genealogy_id = member.genealogy_id
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "add_parent":
+            parent_id = request.form.get("parent_member_id", type=int)
+            parent_role = request.form.get("parent_role", "")
+            add_parent_child(genealogy_id, parent_id, member.id, parent_role)
+        elif action == "add_child":
+            child_id = request.form.get("child_member_id", type=int)
+            parent_role = request.form.get("parent_role", "")
+            add_parent_child(genealogy_id, member.id, child_id, parent_role)
+        elif action == "delete_relation":
+            relation_id = request.form.get("relation_id", type=int)
+            relation = ParentChildRelation.query.filter_by(id=relation_id, genealogy_id=genealogy_id).first()
+            if relation:
+                db.session.delete(relation)
+                db.session.commit()
+                flash("父母子女关系已移除。", "success")
+        elif action == "add_marriage":
+            spouse_id = request.form.get("spouse_member_id", type=int)
+            add_marriage(genealogy_id, member.id, spouse_id)
+        elif action == "delete_marriage":
+            marriage_id = request.form.get("marriage_id", type=int)
+            marriage = Marriage.query.filter_by(id=marriage_id, genealogy_id=genealogy_id).first()
+            if marriage and member.id in {marriage.spouse1_member_id, marriage.spouse2_member_id}:
+                db.session.delete(marriage)
+                db.session.commit()
+                flash("婚姻关系已移除。", "success")
+        return redirect(url_for("members.relations", id=member.id))
+
+    parent_relations = (
+        ParentChildRelation.query.filter_by(child_member_id=member.id)
+        .order_by(ParentChildRelation.parent_role)
+        .all()
+    )
+    child_relations = (
+        ParentChildRelation.query.filter_by(parent_member_id=member.id)
+        .order_by(ParentChildRelation.id)
+        .all()
+    )
+    marriages = (
+        Marriage.query.filter(
+            Marriage.genealogy_id == genealogy_id,
+            (Marriage.spouse1_member_id == member.id) | (Marriage.spouse2_member_id == member.id),
+        )
+        .order_by(Marriage.id)
+        .all()
+    )
+    candidates = (
+        Member.query.filter(Member.genealogy_id == genealogy_id, Member.id != member.id)
+        .order_by(Member.generation_no, Member.id)
+        .limit(500)
+        .all()
+    )
+    return render_template(
+        "members/relations.html",
+        member=member,
+        parent_relations=parent_relations,
+        child_relations=child_relations,
+        marriages=marriages,
+        candidates=candidates,
+    )
 
 
 @bp.route("/members/<int:id>/ancestors")

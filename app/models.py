@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
-from sqlalchemy import CheckConstraint, Index, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint, select, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db, login_manager
@@ -153,6 +153,7 @@ class ParentChildRelation(db.Model):
 
     __table_args__ = (
         UniqueConstraint("parent_member_id", "child_member_id", name="uq_parent_child"),
+        UniqueConstraint("child_member_id", "parent_role", name="uq_child_parent_role"),
         CheckConstraint("parent_member_id <> child_member_id", name="ck_parent_not_child"),
         CheckConstraint("parent_role in ('father', 'mother')", name="ck_parent_role"),
         Index("ix_parent_child_genealogy_parent", "genealogy_id", "parent_member_id"),
@@ -198,13 +199,11 @@ class Marriage(db.Model):
 
 
 def accessible_genealogy_query(user):
-    collaborator_subquery = (
-        db.session.query(GenealogyCollaborator.genealogy_id)
-        .filter(GenealogyCollaborator.user_id == user.id)
-        .subquery()
+    collaborator_select = select(GenealogyCollaborator.genealogy_id).filter(
+        GenealogyCollaborator.user_id == user.id
     )
     return Genealogy.query.filter(
-        (Genealogy.owner_id == user.id) | (Genealogy.id.in_(collaborator_subquery))
+        (Genealogy.owner_id == user.id) | (Genealogy.id.in_(collaborator_select))
     )
 
 

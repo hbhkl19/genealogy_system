@@ -20,7 +20,16 @@
         <td>{{ member.gender }}</td>
         <td>{{ member.birth_year or "" }}{% if member.death_year %}-{{ member.death_year }}{% endif %}</td>
         <td>{{ member.generation_no }}</td>
-        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.ancestors', id=member.id) }}">祖先</a></td>
+        <td>
+          <div class="table-actions">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.ancestors', id=member.id) }}">祖先</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.relations', id=member.id) }}">关系</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.edit', id=member.id) }}">编辑</a>
+            <form method="post" action="{{ url_for('members.delete', id=member.id) }}" onsubmit="return confirm('确定删除该成员及相关关系吗？')">
+              <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+            </form>
+          </div>
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="6" class="text-secondary">暂无成员。</td></tr>

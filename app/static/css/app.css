@@ -15,7 +15,8 @@ body {
 .summary-panel,
 .record-card,
 .metric,
-.empty-state {
+.empty-state,
+.panel {
   background: #fff;
   border: 1px solid #e7e3dc;
   border-radius: 8px;
@@ -69,4 +70,28 @@ body {
   border: 1px solid #d9d4ca;
   border-radius: 999px;
   padding: 8px 12px;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.relation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.relation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.relation-row:last-child {
+  border-bottom: 0;
 }
