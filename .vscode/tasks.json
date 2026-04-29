@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Flask",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\flask.exe --app app run --debug",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pytest",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pytest",
+      "problemMatcher": []
+    },
+    {
+      "label": "Seed Data",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe scripts\\seed_data.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "DB Smoke Test",
+      "type": "shell",
+      "command": "psql -U postgres -d genealogy_lab -f sql\\queries\\00_validation.sql",
+      "problemMatcher": []
+    },
+    {
+      "label": "Export Branch",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe scripts\\export_branch.py",
+      "problemMatcher": []
+    }
+  ]
+}

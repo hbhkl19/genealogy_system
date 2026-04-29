@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}新建族谱{% endblock %}
+{% block content %}
+<div class="form-shell">
+  <h1 class="h3 mb-3">新建族谱</h1>
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">族谱名称</label>
+      <input class="form-control" name="name" value="{{ genealogy.name if genealogy else '' }}" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">简介</label>
+      <textarea class="form-control" name="description" rows="4">{{ genealogy.description if genealogy else '' }}</textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">保存</button>
+  </form>
+</div>
+{% endblock %}

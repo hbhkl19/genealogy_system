@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}添加成员{% endblock %}
+{% block content %}
+<div class="form-shell">
+  <h1 class="h3 mb-3">添加成员</h1>
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">姓名</label>
+      <input class="form-control" name="name" required>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">性别</label>
+        <select class="form-select" name="gender">
+          <option value="unknown">未知</option>
+          <option value="male">男</option>
+          <option value="female">女</option>
+        </select>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">代数</label>
+        <input class="form-control" name="generation_no" type="number" min="1" value="1">
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">生年</label>
+        <input class="form-control" name="birth_year" type="number">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">卒年</label>
+        <input class="form-control" name="death_year" type="number">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">生平简介</label>
+      <textarea class="form-control" name="biography" rows="4"></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">保存</button>
+  </form>
+</div>
+{% endblock %}

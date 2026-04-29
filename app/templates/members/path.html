@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}亲缘链路{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">亲缘链路</h1>
+<p class="text-secondary">{{ member_a.name }} 到 {{ member_b.name }}</p>
+{% if path_members %}
+  <div class="path-line">
+    {% for member in path_members %}
+      <span>{{ member.name }} #{{ member.id }}</span>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">两人之间暂未找到可达路径。</div>
+{% endif %}
+{% endblock %}

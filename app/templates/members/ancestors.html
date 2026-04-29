@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}祖先查询{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ member.name }} 的祖先</h1>
+<div class="list-group">
+  {% for row in rows %}
+    <div class="list-group-item d-flex justify-content-between">
+      <span>{{ row.name }} <span class="text-secondary">#{{ row.id }}</span></span>
+      <span class="text-secondary">向上 {{ row.depth }} 代</span>
+    </div>
+  {% else %}
+    <div class="empty-state">暂未找到祖先关系。</div>
+  {% endfor %}
+</div>
+{% endblock %}

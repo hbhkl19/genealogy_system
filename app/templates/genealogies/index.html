@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}我的族谱{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h3 mb-0">我的族谱</h1>
+  <a class="btn btn-primary" href="{{ url_for('genealogies.create') }}">新建族谱</a>
+</div>
+<div class="row g-3">
+  {% for genealogy in genealogies %}
+    <div class="col-md-6 col-xl-4">
+      <a class="record-card d-block" href="{{ url_for('genealogies.detail', id=genealogy.id) }}">
+        <div class="fw-semibold">{{ genealogy.name }}</div>
+        <div class="text-secondary small mt-2">{{ genealogy.description or "暂无简介" }}</div>
+      </a>
+    </div>
+  {% else %}
+    <div class="empty-state">还没有族谱，先创建一个用于实验演示。</div>
+  {% endfor %}
+</div>
+{% endblock %}

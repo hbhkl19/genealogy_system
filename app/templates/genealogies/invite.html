@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}邀请协作者{% endblock %}
+{% block content %}
+<div class="form-shell">
+  <h1 class="h3 mb-3">邀请协作者</h1>
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">用户邮箱</label>
+      <input class="form-control" name="email" type="email" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">角色</label>
+      <select class="form-select" name="role">
+        <option value="editor">编辑者</option>
+        <option value="viewer">查看者</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" type="submit">添加</button>
+  </form>
+</div>
+{% endblock %}

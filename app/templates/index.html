@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}寻根溯源{% endblock %}
+{% block content %}
+<section class="py-5">
+  <div class="row align-items-center g-4">
+    <div class="col-lg-7">
+      <h1 class="display-5 fw-bold">寻根溯源族谱管理系统</h1>
+      <p class="lead text-secondary mt-3">面向课程实验的多用户、多族谱、协作者和成员关系查询系统。</p>
+      <div class="d-flex gap-2 mt-4">
+        <a class="btn btn-primary" href="{{ url_for('auth.register') }}">开始使用</a>
+        <a class="btn btn-outline-secondary" href="{{ url_for('auth.login') }}">登录</a>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="summary-panel">
+        <div class="fw-semibold mb-2">实验覆盖</div>
+        <div class="text-secondary">规范化关系模型、递归 CTE、导入导出、索引优化和 EXPLAIN 对比。</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

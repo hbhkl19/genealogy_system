@@ -1,0 +1,22 @@
+{
+    "git.ignoreLimitWarning": true,
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "Genealogy_Dev",
+            "database": "genealogy_lab",
+            "username": "postgres"
+        }
+    ],
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "editor.formatOnSave": true,
+    "files.exclude": {
+        "**/__pycache__": true
+    }
+}

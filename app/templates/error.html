@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ code }}{% endblock %}
+{% block content %}
+<div class="text-center py-5">
+  <h1 class="display-6">{{ code }}</h1>
+  <p class="text-secondary">{{ message }}</p>
+  <a class="btn btn-primary" href="{{ url_for('main.index') }}">返回首页</a>
+</div>
+{% endblock %}

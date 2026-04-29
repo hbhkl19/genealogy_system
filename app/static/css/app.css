@@ -1,0 +1,72 @@
+body {
+  background: #f7f7f5;
+  color: #252525;
+}
+
+.form-shell {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e7e3dc;
+  border-radius: 8px;
+}
+
+.summary-panel,
+.record-card,
+.metric,
+.empty-state {
+  background: #fff;
+  border: 1px solid #e7e3dc;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.record-card {
+  color: inherit;
+  min-height: 128px;
+  text-decoration: none;
+}
+
+.record-card:hover {
+  border-color: #9a8f7d;
+}
+
+.metric span {
+  display: block;
+  color: #6b6b6b;
+}
+
+.metric strong {
+  display: block;
+  font-size: 2rem;
+}
+
+.tree-list {
+  background: #fff;
+  border: 1px solid #e7e3dc;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.tree-node {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.tree-node:last-child {
+  border-bottom: 0;
+}
+
+.path-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.path-line span {
+  background: #fff;
+  border: 1px solid #d9d4ca;
+  border-radius: 999px;
+  padding: 8px 12px;
+}

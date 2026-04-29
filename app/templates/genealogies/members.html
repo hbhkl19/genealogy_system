@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}成员列表{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h3 mb-0">{{ genealogy.name }}成员</h1>
+  <a class="btn btn-primary" href="{{ url_for('members.create', genealogy_id=genealogy.id) }}">添加成员</a>
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-sm-9"><input class="form-control" name="q" value="{{ q }}" placeholder="按姓名模糊搜索"></div>
+  <div class="col-sm-3"><button class="btn btn-outline-secondary w-100" type="submit">搜索</button></div>
+</form>
+<div class="table-responsive">
+  <table class="table align-middle">
+    <thead><tr><th>ID</th><th>姓名</th><th>性别</th><th>生卒年</th><th>代数</th><th></th></tr></thead>
+    <tbody>
+      {% for member in members %}
+      <tr>
+        <td>{{ member.id }}</td>
+        <td>{{ member.name }}</td>
+        <td>{{ member.gender }}</td>
+        <td>{{ member.birth_year or "" }}{% if member.death_year %}-{{ member.death_year }}{% endif %}</td>
+        <td>{{ member.generation_no }}</td>
+        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.ancestors', id=member.id) }}">祖先</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-secondary">暂无成员。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
