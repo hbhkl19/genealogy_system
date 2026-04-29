@@ -14,8 +14,16 @@
     ],
     "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
     "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "-p",
+        "no:cacheprovider"
+    ],
     "python.testing.unittestEnabled": false,
     "editor.formatOnSave": true,
+    "terminal.integrated.inheritEnv": true,
+    "terminal.integrated.env.windows": {
+        "PATH": "${env:PATH};C:\\Program Files\\PostgreSQL\\16\\bin"
+    },
     "files.exclude": {
         "**/__pycache__": true
     }

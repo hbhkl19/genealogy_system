@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
-from sqlalchemy import CheckConstraint, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db, login_manager
@@ -14,7 +14,12 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(64), nullable=False, unique=True, index=True)
     email = db.Column(db.String(120), nullable=False, unique=True, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=db.func.now(),
+    )
 
     genealogies = db.relationship("Genealogy", back_populates="owner", lazy="dynamic")
 
@@ -37,7 +42,12 @@ class Genealogy(db.Model):
     name = db.Column(db.String(120), nullable=False)
     description = db.Column(db.Text)
     owner_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=db.func.now(),
+    )
 
     owner = db.relationship("User", back_populates="genealogies")
     collaborators = db.relationship(
@@ -64,8 +74,13 @@ class GenealogyCollaborator(db.Model):
         index=True,
     )
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
-    role = db.Column(db.String(20), nullable=False, default="editor")
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    role = db.Column(db.String(20), nullable=False, default="editor", server_default="editor")
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=db.func.now(),
+    )
 
     genealogy = db.relationship("Genealogy", back_populates="collaborators")
     user = db.relationship("User")
@@ -91,8 +106,13 @@ class Member(db.Model):
     birth_year = db.Column(db.Integer)
     death_year = db.Column(db.Integer)
     biography = db.Column(db.Text)
-    generation_no = db.Column(db.Integer, nullable=False, default=1)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    generation_no = db.Column(db.Integer, nullable=False, default=1, server_default="1")
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=db.func.now(),
+    )
 
     genealogy = db.relationship("Genealogy", back_populates="members")
 
@@ -100,6 +120,7 @@ class Member(db.Model):
         CheckConstraint("gender in ('male', 'female', 'unknown')", name="ck_member_gender"),
         CheckConstraint("death_year is null or birth_year is null or death_year >= birth_year", name="ck_member_life_years"),
         CheckConstraint("generation_no >= 1", name="ck_member_generation"),
+        Index("ix_members_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}),
     )
 
 
@@ -134,6 +155,8 @@ class ParentChildRelation(db.Model):
         UniqueConstraint("parent_member_id", "child_member_id", name="uq_parent_child"),
         CheckConstraint("parent_member_id <> child_member_id", name="ck_parent_not_child"),
         CheckConstraint("parent_role in ('father', 'mother')", name="ck_parent_role"),
+        Index("ix_parent_child_genealogy_parent", "genealogy_id", "parent_member_id"),
+        Index("ix_parent_child_genealogy_child", "genealogy_id", "child_member_id"),
     )
 
 
@@ -169,6 +192,8 @@ class Marriage(db.Model):
         UniqueConstraint("spouse1_member_id", "spouse2_member_id", name="uq_marriage_pair"),
         CheckConstraint("spouse1_member_id < spouse2_member_id", name="ck_marriage_ordered_pair"),
         CheckConstraint("ended_year is null or married_year is null or ended_year >= married_year", name="ck_marriage_years"),
+        Index("ix_marriages_genealogy_spouse1", "genealogy_id", "spouse1_member_id"),
+        Index("ix_marriages_genealogy_spouse2", "genealogy_id", "spouse2_member_id"),
     )
 
 

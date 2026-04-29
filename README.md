@@ -59,7 +59,7 @@ DATABASE_URL=postgresql+psycopg://postgres:123456@localhost:5432/genealogy_lab
 
 ```powershell
 .venv\Scripts\Activate.ps1
-flask --app app init-db
+flask --app app db upgrade
 flask --app app routes
 flask --app app run
 ```
@@ -94,6 +94,7 @@ data/               CSV 数据文件
 - `.venv` 已存在，且已安装 Flask、SQLAlchemy、Flask-Login、Flask-Migrate、psycopg、Faker、pytest。
 - `.vscode/settings.json` 已配置 Python 解释器、pytest 和 SQLTools 连接。
 - 已补充 `.vscode/extensions.json`、`.vscode/launch.json`、`.vscode/tasks.json`。
+- 已接入 Flask-Migrate，首个迁移版本位于 `migrations/versions/`。
 - 当前目录不是 Git 仓库，如需要版本管理可执行 `git init`。
 - `rg` 在当前环境中运行时报 `Access is denied`，检查文件时已改用 PowerShell 原生命令。
 

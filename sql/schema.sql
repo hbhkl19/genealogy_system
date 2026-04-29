@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS marriages (
 CREATE INDEX IF NOT EXISTS ix_genealogies_owner_id ON genealogies(owner_id);
 CREATE INDEX IF NOT EXISTS ix_members_genealogy_id ON members(genealogy_id);
 CREATE INDEX IF NOT EXISTS ix_members_name_trgm ON members USING gin (name gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS ix_parent_child_parent ON parent_child_relations(genealogy_id, parent_member_id);
-CREATE INDEX IF NOT EXISTS ix_parent_child_child ON parent_child_relations(genealogy_id, child_member_id);
-CREATE INDEX IF NOT EXISTS ix_marriages_spouse1 ON marriages(genealogy_id, spouse1_member_id);
-CREATE INDEX IF NOT EXISTS ix_marriages_spouse2 ON marriages(genealogy_id, spouse2_member_id);
+CREATE INDEX IF NOT EXISTS ix_parent_child_genealogy_parent ON parent_child_relations(genealogy_id, parent_member_id);
+CREATE INDEX IF NOT EXISTS ix_parent_child_genealogy_child ON parent_child_relations(genealogy_id, child_member_id);
+CREATE INDEX IF NOT EXISTS ix_marriages_genealogy_spouse1 ON marriages(genealogy_id, spouse1_member_id);
+CREATE INDEX IF NOT EXISTS ix_marriages_genealogy_spouse2 ON marriages(genealogy_id, spouse2_member_id);
