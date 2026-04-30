@@ -51,6 +51,9 @@ body {
 }
 
 .tree-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid #eee;
 }
@@ -59,17 +62,30 @@ body {
   border-bottom: 0;
 }
 
-.path-line {
-  display: flex;
-  flex-wrap: wrap;
+.tree-indent {
+  display: inline-block;
+  width: calc(var(--depth, 0) * 28px);
+  flex: 0 0 calc(var(--depth, 0) * 28px);
+}
+
+.path-steps {
+  display: grid;
   gap: 8px;
 }
 
-.path-line span {
+.path-step {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   background: #fff;
   border: 1px solid #d9d4ca;
-  border-radius: 999px;
-  padding: 8px 12px;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.path-step strong {
+  color: #6b4f2a;
 }
 
 .table-actions {

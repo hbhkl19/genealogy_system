@@ -31,6 +31,7 @@ def test_app_routes_load(app):
     assert "/members/<int:id>/edit" in routes
     assert "/members/<int:id>/delete" in routes
     assert "/members/<int:id>/relations" in routes
+    assert "/members/<int:id>/descendants" in routes
 
 
 def seed_user_genealogy_members():
@@ -129,3 +130,38 @@ def test_marriage_is_ordered_and_not_duplicated(app, client):
         assert marriage.spouse1_member_id == min(ids["father_id"], ids["mother_id"])
         assert marriage.spouse2_member_id == max(ids["father_id"], ids["mother_id"])
         assert Marriage.query.count() == 1
+
+
+def test_recursive_views_render_relationships(app, client):
+    with app.app_context():
+        ids = seed_user_genealogy_members()
+        db.session.add(
+            ParentChildRelation(
+                genealogy_id=ids["genealogy_id"],
+                parent_member_id=ids["father_id"],
+                child_member_id=ids["child_id"],
+                parent_role="father",
+            )
+        )
+        db.session.add(
+            Marriage(
+                genealogy_id=ids["genealogy_id"],
+                spouse1_member_id=min(ids["father_id"], ids["mother_id"]),
+                spouse2_member_id=max(ids["father_id"], ids["mother_id"]),
+                married_year=1990,
+            )
+        )
+        db.session.commit()
+
+    login(client)
+
+    descendants = client.get(f"/members/{ids['father_id']}/descendants")
+    tree = client.get(f"/genealogies/{ids['genealogy_id']}/tree")
+    path = client.get(f"/relationship/path?a={ids['father_id']}&b={ids['mother_id']}")
+
+    assert descendants.status_code == 200
+    assert "孩子".encode() in descendants.data
+    assert tree.status_code == 200
+    assert "孩子".encode() in tree.data
+    assert path.status_code == 200
+    assert "配偶".encode() in path.data

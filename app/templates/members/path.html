@@ -4,9 +4,13 @@
 <h1 class="h3 mb-3">亲缘链路</h1>
 <p class="text-secondary">{{ member_a.name }} 到 {{ member_b.name }}</p>
 {% if path_members %}
-  <div class="path-line">
-    {% for member in path_members %}
-      <span>{{ member.name }} #{{ member.id }}</span>
+  <div class="path-steps">
+    {% for step in path_steps %}
+      <div class="path-step">
+        <span>{{ step.from.name }} #{{ step.from.id }}</span>
+        <strong>{{ step.relation }}</strong>
+        <span>{{ step.to.name }} #{{ step.to.id }}</span>
+      </div>
     {% endfor %}
   </div>
 {% else %}

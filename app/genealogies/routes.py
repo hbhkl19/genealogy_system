@@ -1,6 +1,6 @@
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from app.extensions import db
 from app.models import (
@@ -112,15 +112,45 @@ def members(id):
 @login_required
 def tree(id):
     genealogy = get_accessible_genealogy(id)
-    roots = (
-        Member.query.filter(Member.genealogy_id == id)
-        .outerjoin(ParentChildRelation, Member.id == ParentChildRelation.child_member_id)
-        .filter(ParentChildRelation.id.is_(None))
-        .order_by(Member.generation_no, Member.id)
-        .limit(50)
-        .all()
-    )
-    return render_template("genealogies/tree.html", genealogy=genealogy, roots=roots)
+    sql = """
+        WITH RECURSIVE tree AS (
+            SELECT
+                m.id,
+                m.name,
+                m.gender,
+                m.generation_no,
+                0 AS depth,
+                ',' || CAST(m.id AS TEXT) || ',' AS path
+            FROM members m
+            WHERE m.genealogy_id = :genealogy_id
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM parent_child_relations p
+                  WHERE p.child_member_id = m.id
+                    AND p.genealogy_id = :genealogy_id
+              )
+            UNION ALL
+            SELECT
+                child.id,
+                child.name,
+                child.gender,
+                child.generation_no,
+                tree.depth + 1,
+                tree.path || CAST(child.id AS TEXT) || ','
+            FROM tree
+            JOIN parent_child_relations rel ON rel.parent_member_id = tree.id
+            JOIN members child ON child.id = rel.child_member_id
+            WHERE rel.genealogy_id = :genealogy_id
+              AND tree.depth < 12
+              AND tree.path NOT LIKE '%,' || CAST(child.id AS TEXT) || ',%'
+        )
+        SELECT id, name, gender, generation_no, depth
+        FROM tree
+        ORDER BY path
+        LIMIT 500
+    """
+    rows = db.session.execute(text(sql), {"genealogy_id": id}).mappings().all()
+    return render_template("genealogies/tree.html", genealogy=genealogy, rows=rows)
 
 
 @bp.route("/<int:id>/export")

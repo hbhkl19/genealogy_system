@@ -288,6 +288,39 @@ def ancestors(id):
     return render_template("members/ancestors.html", member=member, rows=rows)
 
 
+@bp.route("/members/<int:id>/descendants")
+@login_required
+def descendants(id):
+    member = get_member(id)
+    sql = """
+        WITH RECURSIVE descendants AS (
+            SELECT
+                p.child_member_id AS member_id,
+                p.parent_role,
+                1 AS depth,
+                ',' || CAST(p.child_member_id AS TEXT) || ',' AS path
+            FROM parent_child_relations p
+            WHERE p.parent_member_id = :member_id
+            UNION ALL
+            SELECT
+                p.child_member_id,
+                p.parent_role,
+                d.depth + 1,
+                d.path || CAST(p.child_member_id AS TEXT) || ','
+            FROM parent_child_relations p
+            JOIN descendants d ON p.parent_member_id = d.member_id
+            WHERE d.depth < 12
+              AND d.path NOT LIKE '%,' || CAST(p.child_member_id AS TEXT) || ',%'
+        )
+        SELECT m.id, m.name, m.gender, m.generation_no, descendants.depth, descendants.parent_role
+        FROM descendants
+        JOIN members m ON m.id = descendants.member_id
+        ORDER BY descendants.path
+    """
+    rows = db.session.execute(text(sql), {"member_id": id}).mappings().all()
+    return render_template("members/descendants.html", member=member, rows=rows)
+
+
 @bp.route("/relationship/path")
 @login_required
 def relationship_path():
@@ -304,27 +337,36 @@ def relationship_path():
 
     sql = """
         WITH RECURSIVE edges AS (
-            SELECT parent_member_id AS from_id, child_member_id AS to_id FROM parent_child_relations
+            SELECT parent_member_id AS from_id, child_member_id AS to_id, 'child' AS relation_type FROM parent_child_relations
             WHERE genealogy_id = :genealogy_id
             UNION
-            SELECT child_member_id, parent_member_id FROM parent_child_relations
+            SELECT child_member_id, parent_member_id, parent_role FROM parent_child_relations
             WHERE genealogy_id = :genealogy_id
             UNION
-            SELECT spouse1_member_id, spouse2_member_id FROM marriages
+            SELECT spouse1_member_id, spouse2_member_id, 'spouse' FROM marriages
             WHERE genealogy_id = :genealogy_id
             UNION
-            SELECT spouse2_member_id, spouse1_member_id FROM marriages
+            SELECT spouse2_member_id, spouse1_member_id, 'spouse' FROM marriages
             WHERE genealogy_id = :genealogy_id
         ),
         walk AS (
-            SELECT :start_id AS member_id, ARRAY[:start_id] AS path, 0 AS depth
+            SELECT
+                :start_id AS member_id,
+                ',' || CAST(:start_id AS TEXT) || ',' AS path,
+                '' AS relation_types,
+                0 AS depth
             UNION ALL
-            SELECT e.to_id, walk.path || e.to_id, walk.depth + 1
+            SELECT
+                e.to_id,
+                walk.path || CAST(e.to_id AS TEXT) || ',',
+                walk.relation_types || e.relation_type || ',',
+                walk.depth + 1
             FROM walk
             JOIN edges e ON e.from_id = walk.member_id
-            WHERE walk.depth < 12 AND NOT e.to_id = ANY(walk.path)
+            WHERE walk.depth < 12
+              AND walk.path NOT LIKE '%,' || CAST(e.to_id AS TEXT) || ',%'
         )
-        SELECT path FROM walk
+        SELECT path, relation_types FROM walk
         WHERE member_id = :end_id
         ORDER BY depth
         LIMIT 1
@@ -334,12 +376,30 @@ def relationship_path():
         {"genealogy_id": member_a.genealogy_id, "start_id": member_a.id, "end_id": member_b.id},
     ).first()
     path_members = []
+    path_steps = []
     if row:
-        path_members = Member.query.filter(Member.id.in_(row.path)).all()
-        path_members = sorted(path_members, key=lambda item: row.path.index(item.id))
+        path_ids = [int(value) for value in row.path.strip(",").split(",") if value]
+        relation_types = [value for value in row.relation_types.strip(",").split(",") if value]
+        path_members = Member.query.filter(Member.id.in_(path_ids)).all()
+        path_members = sorted(path_members, key=lambda item: path_ids.index(item.id))
+        relation_labels = {
+            "father": "父亲",
+            "mother": "母亲",
+            "child": "子女",
+            "spouse": "配偶",
+        }
+        for index, relation_type in enumerate(relation_types):
+            path_steps.append(
+                {
+                    "from": path_members[index],
+                    "to": path_members[index + 1],
+                    "relation": relation_labels.get(relation_type, relation_type),
+                }
+            )
     return render_template(
         "members/path.html",
         member_a=member_a,
         member_b=member_b,
         path_members=path_members,
+        path_steps=path_steps,
     )

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}后代查询{% endblock %}
+{% block content %}
+<div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+  <div>
+    <h1 class="h3 mb-1">{{ member.name }} 的直系后代</h1>
+    <div class="text-secondary">成员 ID：{{ member.id }}</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('genealogies.members', id=member.genealogy_id) }}">返回成员列表</a>
+</div>
+<div class="tree-list">
+  {% for row in rows %}
+    <div class="tree-node" style="--depth: {{ row.depth - 1 }}">
+      <span class="tree-indent"></span>
+      <span class="badge text-bg-light">向下 {{ row.depth }} 代</span>
+      {{ row.name }} <span class="text-secondary">#{{ row.id }}，第 {{ row.generation_no }} 代</span>
+    </div>
+  {% else %}
+    <div class="empty-state">暂未找到直系后代关系。</div>
+  {% endfor %}
+</div>
+{% endblock %}

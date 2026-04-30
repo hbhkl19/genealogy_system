@@ -3,13 +3,15 @@
 {% block content %}
 <h1 class="h3 mb-3">{{ genealogy.name }}树形预览</h1>
 <div class="tree-list">
-  {% for member in roots %}
-    <div class="tree-node">
-      <span class="badge text-bg-light">第 {{ member.generation_no }} 代</span>
-      {{ member.name }} <span class="text-secondary">#{{ member.id }}</span>
+  {% for row in rows %}
+    <div class="tree-node" style="--depth: {{ row.depth }}">
+      <span class="tree-indent"></span>
+      <span class="badge text-bg-light">第 {{ row.generation_no }} 代</span>
+      <a href="{{ url_for('members.relations', id=row.id) }}">{{ row.name }}</a>
+      <span class="text-secondary">#{{ row.id }}</span>
     </div>
   {% else %}
-    <div class="empty-state">暂无根节点成员。添加成员和父子关系后可扩展为完整折叠树。</div>
+    <div class="empty-state">暂无可展示成员。添加成员和父子关系后可查看缩进树。</div>
   {% endfor %}
 </div>
 {% endblock %}

@@ -9,6 +9,11 @@
   <div class="col-sm-9"><input class="form-control" name="q" value="{{ q }}" placeholder="按姓名模糊搜索"></div>
   <div class="col-sm-3"><button class="btn btn-outline-secondary w-100" type="submit">搜索</button></div>
 </form>
+<form class="row g-2 mb-4" action="{{ url_for('members.relationship_path') }}">
+  <div class="col-sm-5"><input class="form-control" name="a" type="number" min="1" placeholder="成员 A ID"></div>
+  <div class="col-sm-5"><input class="form-control" name="b" type="number" min="1" placeholder="成员 B ID"></div>
+  <div class="col-sm-2"><button class="btn btn-outline-secondary w-100" type="submit">亲缘链路</button></div>
+</form>
 <div class="table-responsive">
   <table class="table align-middle">
     <thead><tr><th>ID</th><th>姓名</th><th>性别</th><th>生卒年</th><th>代数</th><th></th></tr></thead>
@@ -23,6 +28,7 @@
         <td>
           <div class="table-actions">
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.ancestors', id=member.id) }}">祖先</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.descendants', id=member.id) }}">后代</a>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.relations', id=member.id) }}">关系</a>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('members.edit', id=member.id) }}">编辑</a>
             <form method="post" action="{{ url_for('members.delete', id=member.id) }}" onsubmit="return confirm('确定删除该成员及相关关系吗？')">
