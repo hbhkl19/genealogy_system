@@ -75,8 +75,8 @@
 - `[x]` 编写初版 `sql/schema.sql`。
 - `[x]` 编写基础索引：姓名 trigram、父子查询索引、婚姻双方索引。
 - `[x]` 接入 Flask-Migrate，生成首个迁移版本。
-- `[ ]` 编写跨行约束触发器。
-- `[ ]` 整理 E-R 图、关系模式和 3NF 说明。
+- `[x]` 编写跨行约束触发器。
+- `[x]` 整理 E-R 图、关系模式和 3NF 说明。
 
 ### M6 数据生成、导入与导出
 
@@ -160,9 +160,31 @@
   - `pytest` 通过，结果为 `4 passed`。
   - `compileall` 通过。
 
+### 2026-04-30 第五轮
+
+- 完成 M5 数据库结构、DDL 与约束。
+- 新增迁移 `8ef1ddc6ab24_add_relationship_integrity_triggers.py`。
+- 新增 PostgreSQL 触发器：
+  - `trg_validate_parent_child_relation`：校验父母与子女同族谱、父母代数小于子女、父母出生年早于子女。
+  - `trg_validate_marriage_relation`：校验配偶双方属于同一族谱。
+  - `trg_validate_member_existing_relations`：更新成员族谱、生年、代数时，防止破坏已有父子或婚姻关系。
+- 同步更新 `sql/schema.sql`，让手工建库 DDL 与迁移保持一致。
+- 新增 `docs/data_model.md`，包含 E-R 图、关系模式、约束策略、3NF 说明和索引说明。
+- 补充数据库工件测试，确保触发器迁移、schema 和数据模型文档存在关键内容。
+- 使用事务内 smoke test 验证触发器：
+  - 非法父子关系被触发器拒绝。
+  - 跨族谱婚姻被触发器拒绝。
+  - 测试数据已回滚，不污染开发库。
+- 验证结果：
+  - `flask --app app db upgrade` 成功。
+  - `flask --app app db current` 返回 `8ef1ddc6ab24 (head)`。
+  - `flask --app app routes` 成功。
+  - `pytest` 通过，结果为 `7 passed`。
+  - `compileall app scripts migrations` 成功。
+
 ## 下次建议优先级
 
-1. 进入 M5，补跨行约束触发器，并整理 E-R 图、关系模式和 3NF 说明。
-2. 进入 M6，实现 Faker 数据生成和 CSV 导入导出。
-3. 进入 M7，准备 EXPLAIN 性能对比和截图材料。
+1. 进入 M6，实现 Faker 数据生成和 CSV 导入导出。
+2. 进入 M7，准备 EXPLAIN 性能对比和截图材料。
+3. 准备演示账号和示例族谱，开始积累报告截图。
 4. 继续确认 VSCode 集成终端中 `psql --version` 是否可用。
