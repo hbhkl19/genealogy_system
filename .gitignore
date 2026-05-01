@@ -6,5 +6,6 @@ __pycache__/
 pytest-cache-files-*/
 instance/
 data/*.csv
+data/**/*.csv
 htmlcov/
 .coverage

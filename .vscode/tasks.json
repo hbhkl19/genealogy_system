@@ -20,6 +20,12 @@
       "problemMatcher": []
     },
     {
+      "label": "Import CSV",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe scripts\\import_csv.py --input-dir data\\generated",
+      "problemMatcher": []
+    },
+    {
       "label": "DB Smoke Test",
       "type": "shell",
       "command": "psql -U postgres -d genealogy_lab -f sql\\queries\\00_validation.sql",

@@ -70,6 +70,28 @@ flask --app app run
 http://127.0.0.1:5000
 ```
 
+## 数据生成与导入
+
+生成满足实验规模要求的 CSV：
+
+```powershell
+.venv\Scripts\python.exe scripts\seed_data.py --output-dir data\generated
+```
+
+导入 PostgreSQL：
+
+```powershell
+.venv\Scripts\python.exe scripts\import_csv.py --input-dir data\generated --truncate
+```
+
+导出某个成员分支：
+
+```powershell
+.venv\Scripts\python.exe scripts\export_branch.py --member-id 1 --output-dir data\branch_export
+```
+
+详细说明见 [docs/data_pipeline.md](docs/data_pipeline.md)。
+
 ## 项目结构
 
 ```text
@@ -100,8 +122,6 @@ data/               CSV 数据文件
 
 ## 后续实施重点
 
-- 完成父母子女关系、婚姻关系的新增和合法性校验页面。
-- 编写 Faker 数据生成脚本，满足 `>= 10` 个族谱、总成员数 `>= 100000`、最大单族谱 `>= 50000`、最大代际深度 `>= 30`。
-- 使用 `COPY` 完成 CSV 导入和分支导出。
+- 使用 `COPY` 导入生成数据后，准备演示账号和截图材料。
 - 完成 `EXPLAIN (ANALYZE, BUFFERS)` 性能对比并保存截图。
 - 整理 E-R 图、关系模式、3NF 说明、DDL 和实验报告。
