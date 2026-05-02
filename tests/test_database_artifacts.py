@@ -30,3 +30,24 @@ def test_data_model_document_covers_er_and_3nf():
     assert "关系模式" in document
     assert "3NF" in document
     assert "跨行约束使用 PostgreSQL 触发器" in document
+
+
+def test_final_documentation_exists():
+    for path in [
+        ROOT / "docs" / "demo_guide.md",
+        ROOT / "docs" / "backup_restore.md",
+        ROOT / "docs" / "report_outline.md",
+        ROOT / "docs" / "data_pipeline.md",
+    ]:
+        assert path.exists()
+
+
+def test_final_scripts_exist():
+    for path in [
+        ROOT / "scripts" / "db_smoke_test.py",
+        ROOT / "scripts" / "explain_performance.py",
+        ROOT / "scripts" / "create_demo_data.py",
+        ROOT / "scripts" / "import_csv.py",
+        ROOT / "scripts" / "export_branch.py",
+    ]:
+        assert path.exists()

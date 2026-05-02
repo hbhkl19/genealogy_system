@@ -92,6 +92,35 @@ http://127.0.0.1:5000
 
 详细说明见 [docs/data_pipeline.md](docs/data_pipeline.md)。
 
+## 演示与报告
+
+创建小型演示账号和演示族谱：
+
+```powershell
+.venv\Scripts\python.exe scripts\create_demo_data.py
+```
+
+演示账号：
+
+```text
+demo@example.com
+demo123456
+```
+
+数据库验收：
+
+```powershell
+.venv\Scripts\python.exe scripts\db_smoke_test.py
+```
+
+性能对比：
+
+```powershell
+.venv\Scripts\python.exe scripts\explain_performance.py --output docs\performance_results.md
+```
+
+演示流程见 [docs/demo_guide.md](docs/demo_guide.md)，备份恢复见 [docs/backup_restore.md](docs/backup_restore.md)，报告提纲见 [docs/report_outline.md](docs/report_outline.md)。
+
 ## 项目结构
 
 ```text

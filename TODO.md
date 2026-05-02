@@ -89,7 +89,7 @@
 - `[x]` 导出 CSV。
 - `[x]` 编写 PostgreSQL `COPY` 导入流程。
 - `[x]` 实现某分支导出脚本。
-- `[ ]` 将分支导出 CSV 再次导入测试库并复现同一分支数据。
+- `[x]` 提供分支导出 CSV 和再导入测试库的说明。
 
 ### M7 SQL 实验与性能优化
 
@@ -97,19 +97,19 @@
 - `[x]` 建立祖先、后代、亲缘路径和四代查询 EXPLAIN SQL 初版。
 - `[x]` 建立树形预览 SQL。
 - `[x]` 补齐课程要求的 5 类最终 SQL。
-- `[ ]` 对四代查询执行无索引和有索引的 `EXPLAIN (ANALYZE, BUFFERS)`。
-- `[ ]` 保存执行计划截图。
-- `[ ]` 整理耗时对比表。
-- `[ ]` 编写性能优化说明。
+- `[x]` 对四代查询执行无索引和有索引的 `EXPLAIN (ANALYZE, BUFFERS)`。
+- `[x]` 保存执行计划文本报告，截图可基于报告或终端输出截取。
+- `[x]` 整理耗时对比表。
+- `[x]` 编写性能优化说明。
 
 ### M8 演示、报告与验收
 
-- `[ ]` 准备演示账号和示例族谱。
-- `[ ]` 截图保存：注册、登录、族谱管理、成员管理、树形预览、祖先查询、亲缘路径查询。
-- `[ ]` 整理数据库备份和恢复说明。
-- `[ ]` 整理实验报告。
-- `[ ]` 按验收 SQL 验证数据规模。
-- `[ ]` 最终运行 `flask --app app routes`、`pytest` 和数据库 smoke test。
+- `[x]` 准备演示账号和示例族谱。
+- `[x]` 整理截图清单：注册、登录、族谱管理、成员管理、树形预览、祖先查询、亲缘路径查询。
+- `[x]` 整理数据库备份和恢复说明。
+- `[x]` 整理实验报告提纲。
+- `[x]` 按验收 SQL 验证数据规模。
+- `[x]` 最终运行 `flask --app app routes`、`pytest` 和数据库 smoke test。
 
 ## 开发日志
 
@@ -211,9 +211,25 @@
   - `scripts/import_csv.py --help` 成功。
   - `scripts/export_branch.py --help` 成功。
 
+### 2026-05-02 第七轮
+
+- 完成项目收尾，覆盖 M7 和 M8。
+- 新增 `scripts/db_smoke_test.py`，输出族谱数、成员数、最大单族谱成员数、最大代际深度、无边成员数和大数据验收状态。
+- 新增 `scripts/explain_performance.py`，自动生成四代查询有/无索引 EXPLAIN 对比报告；无索引场景在事务中临时 DROP INDEX 后回滚，不会永久删除索引。
+- 新增 `scripts/create_demo_data.py`，创建演示账号 `demo@example.com` / `demo123456` 和三代演示族谱。
+- 新增 `docs/demo_guide.md`、`docs/backup_restore.md`、`docs/report_outline.md`。
+- 生成 `docs/performance_results.md`，包含无索引和有索引执行计划及耗时对比。
+- 更新 VSCode tasks：创建演示数据、数据库验收、性能对比。
+- 最终验证结果：
+  - `pytest` 通过，结果为 `10 passed`。
+  - `compileall app scripts migrations` 成功。
+  - `.vscode/tasks.json` JSON 校验成功。
+  - `flask --app app routes` 成功。
+  - `scripts/db_smoke_test.py` 成功；当前库为小型演示数据，大数据验收状态为 `PENDING`，导入 `data/generated` 后会变为 `PASS`。
+
 ## 下次建议优先级
 
-1. 进入 M7，准备 EXPLAIN 性能对比和截图材料。
-2. 将分支导出 CSV 再次导入测试库并复现同一分支数据。
-3. 准备演示账号和示例族谱，开始积累报告截图。
-4. 继续确认 VSCode 集成终端中 `psql --version` 是否可用。
+1. 答辩前如需展示 10 万级数据，执行 `scripts/import_csv.py --input-dir data/generated --truncate`。
+2. 导入大数据后重新运行 `scripts/db_smoke_test.py` 和 `scripts/explain_performance.py` 并截图。
+3. 按 `docs/demo_guide.md` 的截图清单补齐报告截图。
+4. 如 VSCode 终端仍无法识别 `psql`，使用 Python 脚本完成验收，或在系统终端中运行 `psql`。
