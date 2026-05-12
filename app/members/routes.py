@@ -316,6 +316,200 @@ def descendants(id):
     return render_template("members/descendants.html", member=member, rows=rows)
 
 
+EDGE_CTE_NO_REL = """
+    SELECT parent_member_id AS from_id, child_member_id AS to_id
+    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    UNION ALL
+    SELECT child_member_id, parent_member_id
+    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    UNION ALL
+    SELECT spouse1_member_id, spouse2_member_id
+    FROM marriages WHERE genealogy_id = :genealogy_id
+    UNION ALL
+    SELECT spouse2_member_id, spouse1_member_id
+    FROM marriages WHERE genealogy_id = :genealogy_id
+"""
+
+EDGE_CTE_WITH_REL = """
+    SELECT parent_member_id AS from_id, child_member_id AS to_id, 'child' AS relation_type
+    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    UNION ALL
+    SELECT child_member_id, parent_member_id, parent_role
+    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    UNION ALL
+    SELECT spouse1_member_id, spouse2_member_id, 'spouse'
+    FROM marriages WHERE genealogy_id = :genealogy_id
+    UNION ALL
+    SELECT spouse2_member_id, spouse1_member_id, 'spouse'
+    FROM marriages WHERE genealogy_id = :genealogy_id
+"""
+
+
+def _bfs_reachable(genealogy_id, root_id, max_depth):
+    """Phase 1: fast BFS returning {member_id: min_depth}.
+    Prefer stored PL/pgSQL function for deep searches (avoids CTE recursion overhead).
+    Falls back to UNION-based CTE if function is not deployed."""
+    if max_depth >= 8:
+        try:
+            rows = db.session.execute(
+                text("SELECT member_id, depth FROM bfs_reachable(:gid, :rid, :md)"),
+                {"gid": genealogy_id, "rid": root_id, "md": max_depth},
+            ).fetchall()
+            return {r[0]: r[1] for r in rows}
+        except Exception:
+            db.session.rollback()
+
+    sql = (
+        "WITH RECURSIVE edges AS NOT MATERIALIZED ("
+        + EDGE_CTE_NO_REL + "),\n"
+        + "walk AS (\n"
+        + "    SELECT CAST(:root_id AS INTEGER) AS member_id, 0 AS depth\n"
+        + "    UNION\n"
+        + "    SELECT e.to_id, walk.depth + 1\n"
+        + "    FROM walk JOIN edges e ON e.from_id = walk.member_id\n"
+        + "    WHERE walk.depth < :max_depth\n"
+        + ") CYCLE member_id SET is_cycle USING cycle_path\n"
+        + "SELECT member_id, MIN(depth) FROM walk WHERE NOT is_cycle GROUP BY member_id"
+    )
+    rows = db.session.execute(
+        text(sql),
+        {"genealogy_id": genealogy_id, "root_id": root_id, "max_depth": max_depth},
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+NEIGHBOR_QUERY = """
+    SELECT parent_member_id AS nid
+    FROM parent_child_relations
+    WHERE genealogy_id = :gid AND child_member_id = :mid
+    UNION ALL
+    SELECT child_member_id
+    FROM parent_child_relations
+    WHERE genealogy_id = :gid AND parent_member_id = :mid
+    UNION ALL
+    SELECT spouse2_member_id
+    FROM marriages
+    WHERE genealogy_id = :gid AND spouse1_member_id = :mid
+    UNION ALL
+    SELECT spouse1_member_id
+    FROM marriages
+    WHERE genealogy_id = :gid AND spouse2_member_id = :mid
+"""
+
+
+def _reconstruct_path(genealogy_id, start_id, meeting_id, depth, distances):
+    """Phase 2: backtrack from meeting_id to start_id using distances map.
+    Does per-step neighbor queries (O(depth) queries, each < 5ms).
+    Returns (path_ids_list, relation_labels_list)."""
+    # Pre-group distances for fast candidate lookup
+    depth_to_members = {}
+    for mid, d in distances.items():
+        depth_to_members.setdefault(d, []).append(mid)
+
+    path_ids = [meeting_id]
+    current = meeting_id
+    for d in range(depth - 1, -1, -1):
+        candidates = depth_to_members.get(d, [])
+        row = db.session.execute(
+            text(
+                "SELECT nid FROM (" + NEIGHBOR_QUERY + ") neighbors"
+                " WHERE nid = ANY(:candidates) LIMIT 1"
+            ),
+            {"gid": genealogy_id, "mid": current, "candidates": candidates},
+        ).first()
+        if not row:
+            return None, None
+        path_ids.insert(0, row[0])
+        current = row[0]
+
+    relations = _lookup_relations_batch(genealogy_id, path_ids)
+    return path_ids, relations
+
+
+def _reconstruct_path_sql(genealogy_id, start_id, meeting_id, depth):
+    """Fallback Phase 2: SQL-based path reconstruction for deep paths (>6).
+    Uses UNION ALL walk with ARRAY path tracking, bounded to known depth."""
+    sql = (
+        "WITH RECURSIVE edges AS NOT MATERIALIZED (" + EDGE_CTE_WITH_REL + "),\n"
+        + "walk AS (\n"
+        + "    SELECT CAST(:start_id AS INTEGER) AS member_id,\n"
+        + "           ARRAY[CAST(:start_id AS INTEGER)] AS path,\n"
+        + "           ARRAY[]::TEXT[] AS rels,\n"
+        + "           0 AS depth\n"
+        + "    UNION ALL\n"
+        + "    SELECT e.to_id,\n"
+        + "           walk.path || e.to_id,\n"
+        + "           walk.rels || e.relation_type,\n"
+        + "           walk.depth + 1\n"
+        + "    FROM walk\n"
+        + "    JOIN edges e ON e.from_id = walk.member_id\n"
+        + "    WHERE walk.depth < :max_depth\n"
+        + ") CYCLE member_id SET is_cycle USING cycle_path\n"
+        + "SELECT path, rels FROM walk\n"
+        + "WHERE member_id = :target_id AND NOT is_cycle\n"
+        + "ORDER BY depth LIMIT 1"
+    )
+    row = db.session.execute(
+        text(sql),
+        {
+            "genealogy_id": genealogy_id,
+            "start_id": start_id,
+            "target_id": meeting_id,
+            "max_depth": depth + 1,
+        },
+    ).first()
+    if row is None:
+        return None, None
+    return list(row.path), list(row.rels)
+
+
+def _lookup_relations_batch(genealogy_id, path_ids):
+    """Batch-lookup relation labels between consecutive members in path.
+    Uses a single VALUES-based query instead of O(n) individual queries."""
+    if len(path_ids) < 2:
+        return []
+    n = len(path_ids) - 1
+    gid = genealogy_id
+
+    values_clause = ", ".join(f"(CAST(:a{i} AS INTEGER), CAST(:b{i} AS INTEGER))" for i in range(n))
+    params = {"gid": gid}
+    for i in range(n):
+        params[f"a{i}"] = path_ids[i]
+        params[f"b{i}"] = path_ids[i + 1]
+
+    sql = f"""
+        SELECT p.a, p.b,
+            CASE
+                WHEN EXISTS(SELECT 1 FROM parent_child_relations
+                            WHERE parent_member_id=p.a AND child_member_id=p.b
+                            AND genealogy_id=:gid) THEN 'child'
+                WHEN EXISTS(SELECT 1 FROM parent_child_relations
+                            WHERE child_member_id=p.a AND parent_member_id=p.b
+                            AND genealogy_id=:gid) THEN
+                    COALESCE((SELECT parent_role FROM parent_child_relations
+                              WHERE child_member_id=p.a AND parent_member_id=p.b
+                              AND genealogy_id=:gid), 'parent')
+                WHEN EXISTS(SELECT 1 FROM marriages
+                            WHERE genealogy_id=:gid
+                            AND ((spouse1_member_id=p.a AND spouse2_member_id=p.b)
+                              OR (spouse1_member_id=p.b AND spouse2_member_id=p.a)))
+                THEN 'spouse'
+            END AS relation
+        FROM (VALUES {values_clause}) AS p(a, b)
+        ORDER BY p.a
+    """
+    rows = db.session.execute(text(sql), params).fetchall()
+    return [r[2] if r[2] else "?" for r in rows]
+
+
+RELATION_LABELS = {
+    "father": "父亲",
+    "mother": "母亲",
+    "child": "子女",
+    "spouse": "配偶",
+}
+
+
 @bp.route("/relationship/path")
 @login_required
 def relationship_path():
@@ -330,66 +524,109 @@ def relationship_path():
     if member_a.genealogy_id != member_b.genealogy_id:
         abort(404)
 
-    sql = """
-        WITH RECURSIVE edges AS (
-            SELECT parent_member_id AS from_id, child_member_id AS to_id, 'child' AS relation_type FROM parent_child_relations
-            WHERE genealogy_id = :genealogy_id
-            UNION
-            SELECT child_member_id, parent_member_id, parent_role FROM parent_child_relations
-            WHERE genealogy_id = :genealogy_id
-            UNION
-            SELECT spouse1_member_id, spouse2_member_id, 'spouse' FROM marriages
-            WHERE genealogy_id = :genealogy_id
-            UNION
-            SELECT spouse2_member_id, spouse1_member_id, 'spouse' FROM marriages
-            WHERE genealogy_id = :genealogy_id
-        ),
-        walk AS (
-            SELECT
-                :start_id AS member_id,
-                ',' || CAST(:start_id AS TEXT) || ',' AS id_path,
-                '' AS relation_types,
-                0 AS depth
-            UNION ALL
-            SELECT
-                e.to_id,
-                walk.id_path || CAST(e.to_id AS TEXT) || ',',
-                walk.relation_types || e.relation_type || ',',
-                walk.depth + 1
-            FROM walk
-            JOIN edges e ON e.from_id = walk.member_id
-            WHERE walk.depth < 12
-        ) CYCLE member_id SET is_cycle USING cycle_path
-        SELECT id_path, relation_types FROM walk
-        WHERE member_id = :end_id AND NOT is_cycle
-        ORDER BY depth
-        LIMIT 1
-    """
-    row = db.session.execute(
-        text(sql),
-        {"genealogy_id": member_a.genealogy_id, "start_id": member_a.id, "end_id": member_b.id},
-    ).first()
+    gid = member_a.genealogy_id
+    start_id = member_a.id
+    end_id = member_b.id
+
+    if start_id == end_id:
+        return render_template(
+            "members/path.html",
+            member_a=member_a,
+            member_b=member_b,
+            path_members=[member_a],
+            path_steps=[],
+        )
+
+    full_path_ids = None
+    relation_types = None
+
+    # --- Progressive bidirectional BFS ---
+    # Try shallow depths first (fast for common close relations)
+    for max_depth in (6, 8, 10, 12, 15):
+        fwd = _bfs_reachable(gid, start_id, max_depth)
+        rev = _bfs_reachable(gid, end_id, max_depth)
+        meeting = set(fwd.keys()) & set(rev.keys())
+
+        if meeting:
+            best = min(meeting, key=lambda m: fwd[m] + rev[m])
+            fwd_depth = fwd[best]
+            rev_depth = rev[best]
+
+            # --- Phase 2: reconstruct both halves ---
+            # Python backtracking: O(depth) per-step queries (each < 5ms with indexes)
+            fwd_ids, fwd_rels = _reconstruct_path(gid, start_id, best, fwd_depth, fwd)
+            rev_ids, rev_rels = _reconstruct_path(gid, end_id, best, rev_depth, rev)
+
+            if fwd_ids and rev_ids:
+                fwd_ids = list(fwd_ids)
+                rev_ids = list(rev_ids)
+                rev_reversed = rev_ids[-2::-1] if len(rev_ids) > 1 else []
+
+                full_path_ids = fwd_ids + rev_reversed
+
+                # Combine relation labels
+                relation_types = list(fwd_rels)
+                rev_rels_list = list(rev_rels)
+                for i in range(len(rev_rels_list) - 1, -1, -1):
+                    rev_rel = rev_rels_list[i]
+                    if rev_rel == "child":
+                        relation_types.append("parent")
+                    elif rev_rel == "spouse":
+                        relation_types.append("spouse")
+                    else:
+                        relation_types.append(rev_rel)
+                break
+
+        if max_depth >= 15:
+            break
+
+    # --- Last resort: legacy single-direction BFS ---
+    if full_path_ids is None:
+        legacy_sql = (
+            "WITH RECURSIVE edges AS NOT MATERIALIZED (" + EDGE_CTE_WITH_REL + "),\n"
+            + "walk AS (\n"
+            + "    SELECT CAST(:start_id AS INTEGER) AS member_id,\n"
+            + "           ',' || CAST(:start_id AS TEXT) || ',' AS id_path,\n"
+            + "           '' AS relation_types,\n"
+            + "           0 AS depth\n"
+            + "    UNION ALL\n"
+            + "    SELECT e.to_id,\n"
+            + "           walk.id_path || CAST(e.to_id AS TEXT) || ',',\n"
+            + "           walk.relation_types || e.relation_type || ',',\n"
+            + "           walk.depth + 1\n"
+            + "    FROM walk\n"
+            + "    JOIN edges e ON e.from_id = walk.member_id\n"
+            + "    WHERE walk.depth < 18\n"
+            + ") CYCLE member_id SET is_cycle USING cycle_path\n"
+            + "SELECT id_path, relation_types FROM walk\n"
+            + "WHERE member_id = :end_id AND NOT is_cycle\n"
+            + "ORDER BY depth LIMIT 1"
+        )
+        row = db.session.execute(
+            text(legacy_sql),
+            {"genealogy_id": gid, "start_id": start_id, "end_id": end_id},
+        ).first()
+        if row:
+            full_path_ids = [int(v) for v in row.id_path.strip(",").split(",") if v]
+            relation_types = [v for v in row.relation_types.strip(",").split(",") if v]
+
     path_members = []
     path_steps = []
-    if row:
-        path_ids = [int(value) for value in row.id_path.strip(",").split(",") if value]
-        relation_types = [value for value in row.relation_types.strip(",").split(",") if value]
-        path_members = Member.query.filter(Member.id.in_(path_ids)).all()
-        path_members = sorted(path_members, key=lambda item: path_ids.index(item.id))
-        relation_labels = {
-            "father": "父亲",
-            "mother": "母亲",
-            "child": "子女",
-            "spouse": "配偶",
-        }
-        for index, relation_type in enumerate(relation_types):
-            path_steps.append(
-                {
-                    "from": path_members[index],
-                    "to": path_members[index + 1],
-                    "relation": relation_labels.get(relation_type, relation_type),
-                }
-            )
+    if full_path_ids:
+        path_members = Member.query.filter(Member.id.in_(full_path_ids)).all()
+        path_members = sorted(path_members, key=lambda m: full_path_ids.index(m.id))
+
+        if relation_types:
+            for index, rel_type in enumerate(relation_types):
+                if index + 1 < len(path_members):
+                    path_steps.append(
+                        {
+                            "from": path_members[index],
+                            "to": path_members[index + 1],
+                            "relation": RELATION_LABELS.get(rel_type, rel_type),
+                        }
+                    )
+
     return render_template(
         "members/path.html",
         member_a=member_a,

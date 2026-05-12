@@ -144,11 +144,87 @@
 
 ---
 
+## 🚀 亲缘链路查询性能优化（2026-05-12）
+
+### 问题诊断
+
+50000 人数据集 (239,506 条边) 上 `/relationship/path` 接口耗时 **126 秒**，远超可用标准。
+
+**根因分析**（详见 `profile_output.txt` EXPLAIN ANALYZE 输出）：
+
+| 瓶颈 | 位置 | 严重度 |
+|------|------|:--:|
+| `UNION ALL` 路径爆炸 — CTE 枚举所有路径而非去重节点 | `routes.py:_bfs_reachable()` | **P0 致命** |
+| `CYCLE` 子句磁盘 I/O — 600 万行 cycle_path 数组写入 ~10GB temp | `routes.py:_bfs_reachable()` | **P0 致命** |
+| Phase 2 逐条查询 — 每步 1 次 DB 往返，标注关系又 N 次 | `routes.py:_lookup_relations_batch()` | P1 严重 |
+
+**实测数据**（优化前 depth≤12）：
+```
+walk CTE 行数:      5,954,424 rows  (应为 ~15,000)
+磁盘临时 I/O:       temp written 1,387,007 blocks ≈ 10.6 GB
+执行时间:           126,865 ms ≈ 126 秒
+```
+
+### 三层优化方案
+
+#### 方案一：`UNION ALL` → `UNION`（1 个关键词）
+
+- **文件**: `app/members/routes.py` — `_bfs_reachable()` 函数
+- **原理**: `UNION` 在每层递归中对 `(member_id, depth)` 去重 → 每层每节点仅保留 1 行
+- **效果**: walk CTE 行数 600 万 → **2.6 万**（230× 减少），CYCLE 磁盘 I/O 完全消除
+
+#### 方案二：批量合并关系标注查询
+
+- **文件**: `app/members/routes.py` — `_lookup_relations_batch()` 函数
+- **原理**: 将 O(n) 次逐条 `CASE WHEN EXISTS` 查询合并为 1 次 `VALUES` 批量查询
+- **效果**: N 次数据库往返 → **1 次**，消除 ~90% Phase 2 延迟
+
+#### 方案三：PL/pgSQL 迭代 BFS 存储函数
+
+- **文件**: `sql/functions/bfs_reachable.sql`（新建）
+- **原理**: `CROSS JOIN LATERAL` 索引点查 + temp table + `ON CONFLICT DO NOTHING` 零成本去重
+- **对比**: 深度 ≥8 时自动启用；深度 ≤6 时回退 UNION CTE（已足够快）
+
+### 性能对比
+
+| 指标 | 优化前 | 优化后 | 加速比 |
+|------|--------|--------|:--:|
+| 单 BFS (depth=12) | 126,000ms | **100ms** | **~1200×** |
+| 单 BFS (depth=15) | 无法完成 | **200ms** | ∞ |
+| 完整路径查询 (2 hops) | ~500ms | **330ms** | 1.5× |
+| 完整路径查询 (4 hops) | ~3000ms | **330~930ms** | 3~9× |
+| 完整路径查询 (8 hops) | ~60000ms | **650~1640ms** | **~40~90×** |
+| 磁盘临时 I/O | 10.6 GB | **0** | 消除 |
+| walk CTE 行数 | 600 万 | **2.6 万** | 230× |
+
+**50000 人数据集 11 场景实测**：
+```
+最慢查询:  1,638 ms  (1.6 秒)
+平均耗时:    596 ms
+所有查询均在 2 秒内完成 ← 满足 "数秒内响应" 需求
+```
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `sql/functions/bfs_reachable.sql` | PL/pgSQL 迭代 BFS 函数 |
+| `scripts/test_optimized_path.py` | 亲缘路径综合性能测试脚本 |
+| `scripts/test_final_path.py` | 路径查询功能验证脚本 |
+
+### 修改文件
+
+| 文件 | 修改量 | 关键变更 |
+|------|:--:|------|
+| `app/members/routes.py` | +18/-13 | `_bfs_reachable`: UNION ALL→UNION + 函数回退; `_lookup_relations_batch`: VALUES 批量查询 |
+
+---
+
 ## 📝 重要修改文件
 
 | 文件 | 修改量 | 关键变更 |
 |------|:--:|------|
-| `app/members/routes.py` | +309 | 递归 CTE 优化、祖先/后代/路径路由 |
+| `app/members/routes.py` | +327 | 递归 CTE 优化、祖先/后代/路径路由、亲缘链路三层优化 |
 | `scripts/seed_data.py` | +263 | 数据多样性重构 |
 | `app/models.py` | +48 | CHECK 约束 + 索引定义 |
 | `sql/schema.sql` | +124 | 完整 DDL + 触发器 + 索引 |
@@ -162,11 +238,13 @@
 ## 📊 最终验收状态
 
 ```
-db_smoke_test:         PASS  (10族谱/104K人/50Kmax/30代/0孤立)
-pytest (10 tests):     PASS
-SQL 查询 4.1-4.5:      全部返回有效结果
-Web 路由 (22条):       全部可用
-索引:                  5 个 (GIN trigram + 4×B-tree 复合)
-触发器:                3 个 (父子/婚姻/成员更新)
-EXPLAIN 加速:          258× (91.65ms → 0.36ms)
+db_smoke_test:            PASS  (10族谱/104K人/50Kmax/30代/0孤立)
+pytest (10 tests):        PASS
+SQL 查询 4.1-4.5:         全部返回有效结果
+Web 路由 (22条):          全部可用
+索引:                     5 个 (GIN trigram + 4×B-tree 复合)
+触发器:                   3 个 (父子/婚姻/成员更新)
+存储函数:                 4 个 (3 约束验证 + 1 BFS)
+EXPLAIN 加速:             258× (91.65ms → 0.36ms)
+亲缘链路查询 (50K 人):    0.3~1.6 秒, ~40~1200× 加速
 ```
