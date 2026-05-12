@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import random
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,12 @@ from faker import Faker
 
 
 DEFAULT_SIZES = [50000] + [6000] * 9
+UNMARRIED_RATE = 0.08
+BIRTH_SPREAD = 5
+LIFESPAN_MIN = 55
+LIFESPAN_MAX = 92
+RECENT_GENERATIONS_ALIVE = 5
+
 CSV_FILES = {
     "users": "users.csv",
     "genealogies": "genealogies.csv",
@@ -37,7 +44,6 @@ class Counters:
 
 
 def even_generation_counts(total: int, generations: int) -> list[int]:
-    """Split total members into even generation sizes."""
     if total < generations * 2:
         raise ValueError("total must allow at least two members per generation")
 
@@ -63,13 +69,26 @@ def open_writer(output_dir: Path, name: str, fieldnames: list[str]):
 
 
 def member_name(fake: Faker, genealogy_index: int, generation_no: int, local_index: int) -> str:
-    # Prefix keeps names useful when searching, while Faker keeps data realistic.
-    return f"G{genealogy_index:02d}-{generation_no:02d}-{local_index:05d}-{fake.name()}"
+    return f"G{genealogy_index:02d}-G{generation_no:02d}-{local_index:04d} {fake.name()}"
+
+
+def birth_year_for(generation_no: int, rng: random.Random) -> int:
+    base = 1930 + (generation_no - 1) * 25
+    return base + rng.randint(-BIRTH_SPREAD, BIRTH_SPREAD)
+
+
+def death_year_for(birth_year: int, generation_no: int, total_generations: int, rng: random.Random) -> int | str:
+    if generation_no > total_generations - RECENT_GENERATIONS_ALIVE:
+        if rng.random() < 0.5:
+            return ""
+    lifespan = rng.randint(LIFESPAN_MIN, LIFESPAN_MAX)
+    return birth_year + lifespan
 
 
 def write_members_for_genealogy(
     *,
     fake: Faker,
+    rng: random.Random,
     genealogy_id: int,
     genealogy_index: int,
     target_size: int,
@@ -84,13 +103,19 @@ def write_members_for_genealogy(
 
     for generation_no, generation_size in enumerate(generation_counts, start=1):
         current_members: list[int] = []
-        birth_year = 1930 + (generation_no - 1) * 25
 
         for local_index in range(generation_size):
             member_id = counters.member_id
             counters.member_id += 1
             gender = "male" if local_index % 2 == 0 else "female"
-            death_year = birth_year + 78 if generation_no <= generations - 4 else ""
+            birth_year = birth_year_for(generation_no, rng)
+            death_year = death_year_for(birth_year, generation_no, generations, rng)
+            biography = (
+                f"第 {generation_no} 代成员"
+                + (f"，生于 {birth_year}" if birth_year else "")
+                + (f"，卒于 {death_year}" if death_year else "")
+                + "。"
+            )
             members_writer.writerow(
                 {
                     "id": member_id,
@@ -99,7 +124,7 @@ def write_members_for_genealogy(
                     "gender": gender,
                     "birth_year": birth_year,
                     "death_year": death_year,
-                    "biography": f"第 {generation_no} 代成员，自动生成用于课程实验。",
+                    "biography": biography,
                     "generation_no": generation_no,
                 }
             )
@@ -132,9 +157,11 @@ def write_members_for_genealogy(
         for index in range(0, len(current_members), 2):
             spouse1_id = current_members[index]
             spouse2_id = current_members[index + 1]
-            current_couples.append((spouse1_id, spouse2_id))
-            married_year = birth_year + 22
-            marriages_writer.writerow(
+
+            if generation_no == 1 or rng.random() >= UNMARRIED_RATE:
+                current_couples.append((spouse1_id, spouse2_id))
+                married_year = birth_year_for(generation_no, rng) + rng.randint(22, 28)
+                marriages_writer.writerow(
                 {
                     "id": counters.marriage_id,
                     "genealogy_id": genealogy_id,
@@ -152,6 +179,7 @@ def write_members_for_genealogy(
 def generate_dataset(output_dir: Path, sizes: list[int], generations: int, seed: int) -> dict[str, int]:
     fake = Faker("zh_CN")
     Faker.seed(seed)
+    rng = random.Random(seed)
     counters = Counters()
 
     handles = []
@@ -213,6 +241,7 @@ def generate_dataset(output_dir: Path, sizes: list[int], generations: int, seed:
             )
             write_members_for_genealogy(
                 fake=fake,
+                rng=rng,
                 genealogy_id=genealogy_index,
                 genealogy_index=genealogy_index,
                 target_size=target_size,
@@ -250,7 +279,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="data/generated", help="CSV output directory.")
     parser.add_argument("--sizes", help="Comma-separated genealogy member counts.")
     parser.add_argument("--generations", type=int, default=30, help="Generation count per genealogy.")
-    parser.add_argument("--seed", type=int, default=20260501, help="Faker random seed.")
+    parser.add_argument("--seed", type=int, default=20260501, help="Random seed.")
     args = parser.parse_args()
 
     sizes = parse_sizes(args.sizes)

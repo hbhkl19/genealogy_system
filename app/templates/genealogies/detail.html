@@ -19,6 +19,7 @@
 <div class="list-group">
   <a class="list-group-item list-group-item-action" href="{{ url_for('genealogies.members', id=genealogy.id) }}">成员列表与搜索</a>
   <a class="list-group-item list-group-item-action" href="{{ url_for('genealogies.tree', id=genealogy.id) }}">树形预览</a>
+  <a class="list-group-item list-group-item-action" href="{{ url_for('genealogies.statistics', id=genealogy.id) }}">SQL 统计查询</a>
   <a class="list-group-item list-group-item-action" href="{{ url_for('genealogies.export', id=genealogy.id) }}">导出成员 CSV</a>
 </div>
 {% endblock %}

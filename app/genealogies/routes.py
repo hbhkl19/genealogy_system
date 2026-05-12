@@ -1,4 +1,6 @@
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
+from urllib.parse import quote
+
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, text
 
@@ -142,7 +144,6 @@ def tree(id):
             JOIN members child ON child.id = rel.child_member_id
             WHERE rel.genealogy_id = :genealogy_id
               AND tree.depth < 12
-              AND tree.path NOT LIKE '%,' || CAST(child.id AS TEXT) || ',%'
         )
         SELECT id, name, gender, generation_no, depth
         FROM tree
@@ -153,19 +154,145 @@ def tree(id):
     return render_template("genealogies/tree.html", genealogy=genealogy, rows=rows)
 
 
+@bp.route("/<int:id>/statistics")
+@login_required
+def statistics(id):
+    genealogy = get_accessible_genealogy(id)
+
+    spouse_children = db.session.execute(
+        text("""
+            SELECT 'spouse' AS kind, spouse_member.name, spouse_member.gender,
+                   s.married_year
+            FROM marriages s
+            JOIN members spouse_member ON (
+                CASE WHEN s.spouse1_member_id = :member_id THEN s.spouse2_member_id
+                     ELSE s.spouse1_member_id
+                END = spouse_member.id
+            )
+            WHERE s.genealogy_id = :genealogy_id
+              AND (s.spouse1_member_id = :member_id OR s.spouse2_member_id = :member_id)
+            UNION ALL
+            SELECT 'child' AS kind, child_member.name, child_member.gender, NULL
+            FROM parent_child_relations rel
+            JOIN members child_member ON child_member.id = rel.child_member_id
+            WHERE rel.genealogy_id = :genealogy_id
+              AND rel.parent_member_id = :member_id
+            ORDER BY kind, name
+        """),
+        {"genealogy_id": id, "member_id": 1},
+    ).mappings().all()
+
+    lifespan_gen = db.session.execute(
+        text("""
+            WITH gen_lifespan AS (
+                SELECT genealogy_id, generation_no,
+                       AVG(death_year - birth_year)::numeric(6,2) AS avg_lifespan,
+                       COUNT(*) AS member_count
+                FROM members
+                WHERE genealogy_id = :genealogy_id
+                  AND birth_year IS NOT NULL AND death_year IS NOT NULL
+                  AND death_year > birth_year
+                GROUP BY genealogy_id, generation_no
+            )
+            SELECT genealogy_id, generation_no, avg_lifespan, member_count
+            FROM gen_lifespan
+            ORDER BY avg_lifespan DESC
+            LIMIT 1
+        """),
+        {"genealogy_id": id},
+    ).mappings().first()
+
+    males_no_spouse = db.session.execute(
+        text("""
+            SELECT m.id, m.name, m.birth_year, m.death_year, m.generation_no,
+                   COALESCE(m.death_year, EXTRACT(YEAR FROM CURRENT_DATE)::int) - m.birth_year AS est_age
+            FROM members m
+            WHERE m.genealogy_id = :genealogy_id
+              AND m.gender = 'male'
+              AND m.birth_year IS NOT NULL
+              AND (COALESCE(m.death_year, EXTRACT(YEAR FROM CURRENT_DATE)::int) - m.birth_year) > 50
+              AND NOT EXISTS (
+                  SELECT 1 FROM marriages mar
+                  WHERE mar.genealogy_id = m.genealogy_id
+                    AND (mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id)
+              )
+            ORDER BY est_age DESC
+            LIMIT 20
+        """),
+        {"genealogy_id": id},
+    ).mappings().all()
+
+    born_before_avg = db.session.execute(
+        text("""
+            WITH gen_avg AS (
+                SELECT genealogy_id, generation_no,
+                       AVG(birth_year)::numeric(6,2) AS avg_birth_year,
+                       COUNT(*) AS total_in_gen
+                FROM members
+                WHERE genealogy_id = :genealogy_id AND birth_year IS NOT NULL
+                GROUP BY genealogy_id, generation_no
+            )
+            SELECT m.id, m.name, m.gender, m.birth_year, m.generation_no,
+                   ga.avg_birth_year,
+                   ROUND((m.birth_year - ga.avg_birth_year)::numeric, 2) AS deviation
+            FROM members m
+            JOIN gen_avg ga ON ga.generation_no = m.generation_no
+                           AND ga.genealogy_id = m.genealogy_id
+            WHERE m.genealogy_id = :genealogy_id
+              AND m.birth_year IS NOT NULL
+              AND m.birth_year < ga.avg_birth_year
+            ORDER BY m.generation_no, m.birth_year, m.id
+            LIMIT 20
+        """),
+        {"genealogy_id": id},
+    ).mappings().all()
+
+    return render_template(
+        "genealogies/statistics.html",
+        genealogy=genealogy,
+        spouse_children=spouse_children,
+        lifespan_gen=lifespan_gen,
+        males_no_spouse=males_no_spouse,
+        born_before_avg=born_before_avg,
+    )
+
+
 @bp.route("/<int:id>/export")
 @login_required
 def export(id):
     genealogy = get_accessible_genealogy(id)
-    rows = Member.query.filter_by(genealogy_id=id).order_by(Member.id).all()
-    lines = ["id,genealogy_id,name,gender,birth_year,death_year,generation_no"]
-    for member in rows:
-        lines.append(
-            f"{member.id},{member.genealogy_id},{member.name},{member.gender},"
-            f"{member.birth_year or ''},{member.death_year or ''},{member.generation_no}"
-        )
+    app = current_app._get_current_object()
+
+    def generate():
+        yield "id,genealogy_id,name,gender,birth_year,death_year,generation_no\n"
+        offset = 0
+        chunk_size = 2000
+        with app.app_context():
+            while True:
+                rows = db.session.execute(
+                    text(
+                        "SELECT id, genealogy_id, name, gender, birth_year, death_year, generation_no "
+                        "FROM members WHERE genealogy_id = :gid "
+                        "ORDER BY id LIMIT :limit OFFSET :offset"
+                    ),
+                    {"gid": id, "limit": chunk_size, "offset": offset},
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    birth = row[4] if row[4] is not None else ""
+                    death = row[5] if row[5] is not None else ""
+                    yield f"{row[0]},{row[1]},{row[2]},{row[3]},{birth},{death},{row[6]}\n"
+                offset += chunk_size
+
+    safe_filename = quote(f"{genealogy.name}_members.csv")
     return Response(
-        "\n".join(lines),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={genealogy.name}_members.csv"},
+        generate(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{safe_filename}"
+            ),
+            "X-Accel-Buffering": "no",
+        },
     )

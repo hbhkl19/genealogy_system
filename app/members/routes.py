@@ -273,7 +273,7 @@ def ancestors(id):
             SELECT p.parent_member_id AS member_id, 1 AS depth
             FROM parent_child_relations p
             WHERE p.child_member_id = :member_id
-            UNION ALL
+            UNION
             SELECT p.parent_member_id, a.depth + 1
             FROM parent_child_relations p
             JOIN ancestors a ON p.child_member_id = a.member_id
@@ -296,26 +296,21 @@ def descendants(id):
         WITH RECURSIVE descendants AS (
             SELECT
                 p.child_member_id AS member_id,
-                p.parent_role,
-                1 AS depth,
-                ',' || CAST(p.child_member_id AS TEXT) || ',' AS path
+                1 AS depth
             FROM parent_child_relations p
             WHERE p.parent_member_id = :member_id
-            UNION ALL
+            UNION
             SELECT
                 p.child_member_id,
-                p.parent_role,
-                d.depth + 1,
-                d.path || CAST(p.child_member_id AS TEXT) || ','
+                d.depth + 1
             FROM parent_child_relations p
             JOIN descendants d ON p.parent_member_id = d.member_id
             WHERE d.depth < 12
-              AND d.path NOT LIKE '%,' || CAST(p.child_member_id AS TEXT) || ',%'
         )
-        SELECT m.id, m.name, m.gender, m.generation_no, descendants.depth, descendants.parent_role
+        SELECT m.id, m.name, m.gender, m.generation_no, descendants.depth
         FROM descendants
         JOIN members m ON m.id = descendants.member_id
-        ORDER BY descendants.path
+        ORDER BY descendants.depth, m.id
     """
     rows = db.session.execute(text(sql), {"member_id": id}).mappings().all()
     return render_template("members/descendants.html", member=member, rows=rows)
@@ -352,22 +347,21 @@ def relationship_path():
         walk AS (
             SELECT
                 :start_id AS member_id,
-                ',' || CAST(:start_id AS TEXT) || ',' AS path,
+                ',' || CAST(:start_id AS TEXT) || ',' AS id_path,
                 '' AS relation_types,
                 0 AS depth
             UNION ALL
             SELECT
                 e.to_id,
-                walk.path || CAST(e.to_id AS TEXT) || ',',
+                walk.id_path || CAST(e.to_id AS TEXT) || ',',
                 walk.relation_types || e.relation_type || ',',
                 walk.depth + 1
             FROM walk
             JOIN edges e ON e.from_id = walk.member_id
             WHERE walk.depth < 12
-              AND walk.path NOT LIKE '%,' || CAST(e.to_id AS TEXT) || ',%'
-        )
-        SELECT path, relation_types FROM walk
-        WHERE member_id = :end_id
+        ) CYCLE member_id SET is_cycle USING cycle_path
+        SELECT id_path, relation_types FROM walk
+        WHERE member_id = :end_id AND NOT is_cycle
         ORDER BY depth
         LIMIT 1
     """
@@ -378,7 +372,7 @@ def relationship_path():
     path_members = []
     path_steps = []
     if row:
-        path_ids = [int(value) for value in row.path.strip(",").split(",") if value]
+        path_ids = [int(value) for value in row.id_path.strip(",").split(",") if value]
         relation_types = [value for value in row.relation_types.strip(",").split(",") if value]
         path_members = Member.query.filter(Member.id.in_(path_ids)).all()
         path_members = sorted(path_members, key=lambda item: path_ids.index(item.id))

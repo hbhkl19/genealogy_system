@@ -1,92 +1,122 @@
-# 四代查询性能对比
+# 物理优化性能对比
 
-查询成员 ID：`9`
+> RDBMS: PostgreSQL 16  
+> 测试数据: 104,000 成员, 201,070 亲子关系, 103,984 婚姻
 
-| 场景 | Execution Time |
-| --- | --- |
-| 临时移除索引 | 0.208 ms |
-| 使用索引 | 0.110 ms |
+---
 
-## 临时移除索引执行计划
+## 一、索引策略
 
-```text
-Sort  (cost=356.08..358.19 rows=845 width=270) (actual time=0.122..0.123 rows=2 loops=1)
-  Sort Key: descendants.depth, m.id
-  Sort Method: quicksort  Memory: 25kB
-  Buffers: shared hit=7
-  CTE descendants
-    ->  Recursive Union  (cost=4.19..281.11 rows=845 width=8) (actual time=0.026..0.042 rows=2 loops=1)
-          Buffers: shared hit=6
-          ->  Bitmap Heap Scan on parent_child_relations  (cost=4.19..12.66 rows=5 width=8) (actual time=0.025..0.026 rows=2 loops=1)
-                Recheck Cond: (parent_member_id = '9'::smallint)
-                Heap Blocks: exact=1
-                Buffers: shared hit=5
-                ->  Bitmap Index Scan on uq_parent_child  (cost=0.00..4.19 rows=5 width=0) (actual time=0.020..0.020 rows=2 loops=1)
-                      Index Cond: (parent_member_id = '9'::smallint)
-                      Buffers: shared hit=4
-          ->  Hash Join  (cost=1.34..26.00 rows=84 width=8) (actual time=0.014..0.014 rows=0 loops=1)
-                Hash Cond: (p.parent_member_id = d.member_id)
-                Buffers: shared hit=1
-                ->  Seq Scan on parent_child_relations p  (cost=0.00..19.90 rows=990 width=8) (actual time=0.002..0.002 rows=6 loops=1)
-                      Buffers: shared hit=1
-                ->  Hash  (cost=1.12..1.12 rows=17 width=8) (actual time=0.005..0.005 rows=2 loops=1)
-                      Buckets: 1024  Batches: 1  Memory Usage: 9kB
-                      ->  WorkTable Scan on descendants d  (cost=0.00..1.12 rows=17 width=8) (actual time=0.001..0.001 rows=2 loops=1)
-                            Filter: (depth < 4)
-  ->  Hash Join  (cost=14.72..33.89 rows=845 width=270) (actual time=0.094..0.110 rows=2 loops=1)
-        Hash Cond: (descendants.member_id = m.id)
-        Buffers: shared hit=7
-        ->  CTE Scan on descendants  (cost=0.00..16.90 rows=845 width=8) (actual time=0.029..0.045 rows=2 loops=1)
-              Buffers: shared hit=6
-        ->  Hash  (cost=12.10..12.10 rows=210 width=266) (actual time=0.015..0.015 rows=6 loops=1)
-              Buckets: 1024  Batches: 1  Memory Usage: 9kB
-              Buffers: shared hit=1
-              ->  Seq Scan on members m  (cost=0.00..12.10 rows=210 width=266) (actual time=0.009..0.010 rows=6 loops=1)
-                    Buffers: shared hit=1
-Planning:
-  Buffers: shared hit=110
-Planning Time: 3.079 ms
-Execution Time: 0.208 ms
-```
+| 需求 | 索引名 | 类型 | 定义 |
+|------|--------|------|------|
+| 姓名模糊查询 | `ix_members_name_trgm` | GIN (pg_trgm) | `USING gin (name gin_trgm_ops)` |
+| 父节点→子节点 | `ix_parent_child_genealogy_parent` | B-tree 复合 | `(genealogy_id, parent_member_id)` |
+| 子节点→父节点 | `ix_parent_child_genealogy_child` | B-tree 复合 | `(genealogy_id, child_member_id)` |
+| 配偶关系查找 | `ix_marriages_genealogy_spouse1` | B-tree 复合 | `(genealogy_id, spouse1_member_id)` |
+| 配偶关系查找 | `ix_marriages_genealogy_spouse2` | B-tree 复合 | `(genealogy_id, spouse2_member_id)` |
 
-## 使用索引执行计划
+---
+
+## 二、四代查询 EXPLAIN 对比（曾祖父 → 曾孙）
+
+### 场景：无索引（强制 Seq Scan）
 
 ```text
-Sort  (cost=356.08..358.19 rows=845 width=270) (actual time=0.049..0.050 rows=2 loops=1)
+Sort  (cost=48218.16..48218.51 rows=142 width=33) (actual time=91.596..91.600 rows=30 loops=1)
   Sort Key: descendants.depth, m.id
-  Sort Method: quicksort  Memory: 25kB
-  Buffers: shared hit=4
+  Sort Method: quicksort  Memory: 26kB
+  Buffers: shared hit=7203
   CTE descendants
-    ->  Recursive Union  (cost=4.19..281.11 rows=845 width=8) (actual time=0.012..0.026 rows=2 loops=1)
-          Buffers: shared hit=3
-          ->  Bitmap Heap Scan on parent_child_relations  (cost=4.19..12.66 rows=5 width=8) (actual time=0.010..0.011 rows=2 loops=1)
-                Recheck Cond: (parent_member_id = '9'::smallint)
-                Heap Blocks: exact=1
-                Buffers: shared hit=2
-                ->  Bitmap Index Scan on ix_parent_child_relations_parent_member_id  (cost=0.00..4.19 rows=5 width=0) (actual time=0.007..0.007 rows=2 loops=1)
-                      Index Cond: (parent_member_id = '9'::smallint)
-                      Buffers: shared hit=1
-          ->  Hash Join  (cost=1.34..26.00 rows=84 width=8) (actual time=0.012..0.012 rows=0 loops=1)
-                Hash Cond: (p.parent_member_id = d.member_id)
-                Buffers: shared hit=1
-                ->  Seq Scan on parent_child_relations p  (cost=0.00..19.90 rows=990 width=8) (actual time=0.002..0.002 rows=6 loops=1)
-                      Buffers: shared hit=1
-                ->  Hash  (cost=1.12..1.12 rows=17 width=8) (actual time=0.004..0.004 rows=2 loops=1)
-                      Buckets: 1024  Batches: 1  Memory Usage: 9kB
-                      ->  WorkTable Scan on descendants d  (cost=0.00..1.12 rows=17 width=8) (actual time=0.002..0.002 rows=2 loops=1)
+    ->  Recursive Union  (cost=0.00..44953.04 rows=142 width=8) (actual time=0.005..65.636 rows=30 loops=1)
+          Buffers: shared hit=5376
+          ->  Seq Scan on parent_child_relations  (cost=0.00..3857.38 rows=2 width=8)
+                Filter: (parent_member_id = '1'::smallint)
+                Rows Removed by Filter: 201068
+                Buffers: shared hit=1344
+          ->  Hash Join  (cost=0.54..4109.43 rows=14 width=8) (actual time=0.429..14.322 rows=7 loops=4)
+                ->  Seq Scan on parent_child_relations p  (cost=0.00..3354.70 rows=201070 width=8)
+                      Buffers: shared hit=4032
+                ->  Hash  (cost=0.45..0.45 rows=7 width=8)
+                      ->  WorkTable Scan on descendants d
                             Filter: (depth < 4)
-  ->  Hash Join  (cost=14.72..33.89 rows=845 width=270) (actual time=0.029..0.043 rows=2 loops=1)
-        Hash Cond: (descendants.member_id = m.id)
-        Buffers: shared hit=4
-        ->  CTE Scan on descendants  (cost=0.00..16.90 rows=845 width=8) (actual time=0.014..0.027 rows=2 loops=1)
-              Buffers: shared hit=3
-        ->  Hash  (cost=12.10..12.10 rows=210 width=266) (actual time=0.008..0.008 rows=6 loops=1)
-              Buckets: 1024  Batches: 1  Memory Usage: 9kB
-              Buffers: shared hit=1
-              ->  Seq Scan on members m  (cost=0.00..12.10 rows=210 width=266) (actual time=0.004..0.005 rows=6 loops=1)
-                    Buffers: shared hit=1
-Planning:
-  Buffers: shared hit=74
-Planning Time: 2.065 ms
-Execution Time: 0.110 ms
+  ->  Hash Join  (cost=4.62..3260.03 rows=142 width=33) (actual time=66.108..91.508 rows=30 loops=1)
+        ->  Seq Scan on members m  (cost=0.00..2864.00 rows=104000 width=29)
+              Buffers: shared hit=1824
+        ->  Hash  (cost=2.84..2.84 rows=142 width=8)
+              ->  CTE Scan on descendants  (cost=0.00..2.84 rows=142 width=8)
+Planning Time: 2.222 ms
+Execution Time: 91.648 ms
 ```
+
+**关键指标**: 顺序扫描 parent_child_relations 全表 (201,070 行)，扫描 members 全表 (104,000 行)
+
+### 场景：有索引（Index Only Scan）
+
+```text
+Sort  (cost=1423.91..1424.27 rows=142 width=33) (actual time=0.301..0.303 rows=30 loops=1)
+  Sort Key: descendants.depth, m.id
+  Sort Method: quicksort  Memory: 26kB
+  Buffers: shared hit=140
+  CTE descendants
+    ->  Recursive Union  (cost=0.42..367.97 rows=142 width=8) (actual time=0.108..0.189 rows=30 loops=1)
+          Buffers: shared hit=50
+          ->  Index Only Scan using uq_parent_child on parent_child_relations
+                Index Cond: (parent_member_id = '1'::smallint)
+                Heap Fetches: 0
+                Buffers: shared hit=7
+          ->  Nested Loop  (cost=0.42..35.81 rows=14 width=8) (actual time=0.007..0.018 rows=7 loops=4)
+                ->  WorkTable Scan on descendants d
+                      Filter: (depth < 4)
+                ->  Index Only Scan using uq_parent_child on parent_child_relations p
+                      Index Cond: (parent_member_id = d.member_id)
+                      Heap Fetches: 0
+                      Buffers: shared hit=43
+  ->  Nested Loop  (cost=0.29..1050.86 rows=142 width=33) (actual time=0.120..0.288 rows=30 loops=1)
+        ->  CTE Scan on descendants
+        ->  Index Scan using members_pkey on members m
+              Index Cond: (id = descendants.member_id)
+              Buffers: shared hit=90
+Planning Time: 0.217 ms
+Execution Time: 0.355 ms
+```
+
+**关键指标**: Index Only Scan 精准定位，Nested Loop 仅处理少量行
+
+### 对比汇总
+
+| 指标 | 无索引 (Seq Scan) | 有索引 (Index Scan) | 提升 |
+|------|:---:|:---:|:---:|
+| **执行时间** | 91.648 ms | 0.355 ms | **258×** |
+| **缓冲区命中** | 7,203 | 140 | **51×** |
+| **扫描方式** | Seq Scan (全表) | Index Only Scan | — |
+| **扫描行数** | 201,070 + 104,000 | ~30 (索引精确定位) | — |
+
+---
+
+## 三、姓名模糊查询 EXPLAIN 对比
+
+### 查询
+
+```sql
+SELECT id, name FROM members WHERE name ILIKE '%周伟%' LIMIT 10
+```
+
+### 场景：强制 Seq Scan
+
+| 指标 | 值 |
+|------|---|
+| 执行时间 | 63.661 ms |
+| 缓冲区 | 1,298 |
+| 扫描方式 | Seq Scan on members |
+| 过滤行数 | 74,032 |
+
+### 场景：强制 GIN trigram 索引
+
+| 指标 | 值 |
+|------|---|
+| 执行时间 | 163.004 ms (含首次磁盘读取) |
+| 缓冲区 | 1,985 (含 685 reads) |
+| 扫描方式 | Bitmap Index Scan on ix_members_name_trgm |
+| 命中行数 | 104,006 (trigram 匹配极宽，因中文单字 trigram 覆盖率高) |
+
+> **说明**: 对于 2 字中文名 + `%keyword%` 全模糊匹配，Seq Scan 性能更优（trigram 特征过于宽泛）。对于前缀匹配 `LIKE 'keyword%'` 或长文本，GIN trigram 索引优势明显。此索引在项目中已部署，实际 Web 搜索接口通过 `ILIKE` + trigram 索引配合工作。

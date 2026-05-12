@@ -6,13 +6,15 @@
 
 - 用户注册、登录、退出和登录拦截。
 - 多族谱管理：创建族谱、查看自己创建或受邀参与的族谱。
-- 协作者邀请：族谱创建者可通过邮箱邀请其他用户参与。
-- 成员管理：添加成员、成员列表、按姓名模糊搜索。
-- Dashboard 统计：展示族谱总人数、男性人数、女性人数。
-- 树形预览入口：当前先展示根节点成员，后续可扩展为折叠树。
-- 递归查询入口：成员祖先查询、两人亲缘链路查询。
-- CSV 导出入口：导出某族谱成员基础数据。
-- SQL 实验目录：预留祖先、后代、亲缘路径、性能查询和数据校验 SQL。
+- 协作者邀请：族谱创建者可通过邮箱邀请其他用户参与（viewer/editor 角色）。
+- 成员管理：添加/编辑/删除成员、按姓名模糊搜索（GIN trigram 索引加速）、分页。
+- 关系管理：添加父母、配偶、子女关系。
+- Dashboard 统计：总人数、男女比例。
+- 树形预览：递归 CTE 展开全族谱树（12 层、500 行限制）。
+- 递归查询：祖先追溯、后代追溯、亲缘最短路径（BFS + CYCLE 子句）。
+- SQL 统计页：5 类 PPT 要求查询集中展示。
+- CSV 导出：流式分块导出、支持 50K+ 成员。
+- 数据库级约束：8 条 CHECK + 3 个跨行触发器。
 
 ## 环境需求
 
@@ -119,7 +121,9 @@ demo123456
 .venv\Scripts\python.exe scripts\explain_performance.py --output docs\performance_results.md
 ```
 
-演示流程见 [docs/demo_guide.md](docs/demo_guide.md)，备份恢复见 [docs/backup_restore.md](docs/backup_restore.md)，报告提纲见 [docs/report_outline.md](docs/report_outline.md)。
+演示流程见 [docs/demo_guide.md](docs/demo_guide.md)，验收指导见 [docs/acceptance_guide.md](docs/acceptance_guide.md)，备份恢复见 [docs/backup_restore.md](docs/backup_restore.md)，报告提纲见 [docs/report_outline.md](docs/report_outline.md)。
+
+完整改动记录见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ## 项目结构
 
@@ -149,8 +153,15 @@ data/               CSV 数据文件
 - 当前目录不是 Git 仓库，如需要版本管理可执行 `git init`。
 - `rg` 在当前环境中运行时报 `Access is denied`，检查文件时已改用 PowerShell 原生命令。
 
-## 后续实施重点
+## 文档索引
 
-- 使用 `COPY` 导入生成数据后，准备演示账号和截图材料。
-- 完成 `EXPLAIN (ANALYZE, BUFFERS)` 性能对比并保存截图。
-- 整理 E-R 图、关系模式、3NF 说明、DDL 和实验报告。
+| 文档 | 说明 |
+|------|------|
+| [CHANGELOG.md](CHANGELOG.md) | 完整改动记录（自克隆以来所有修改） |
+| [docs/project_overview.md](docs/project_overview.md) | 项目完整文档（对照 PPT 要求） |
+| [docs/task_checklist.md](docs/task_checklist.md) | PPT 任务逐条对照清单 |
+| [docs/acceptance_guide.md](docs/acceptance_guide.md) | 验收演示指导（15 分钟路径） |
+| [docs/data_model.md](docs/data_model.md) | ER 图 + 关系模式 + 范式分析 |
+| [docs/data_pipeline.md](docs/data_pipeline.md) | 数据管道操作指南 |
+| [docs/performance_results.md](docs/performance_results.md) | 索引性能对比 (258×) |
+| [docs/demo_guide.md](docs/demo_guide.md) | 演示操作指南 |

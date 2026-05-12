@@ -45,15 +45,15 @@ def main() -> None:
             cursor.execute(
                 """
                 WITH RECURSIVE branch AS (
-                    SELECT id, genealogy_id, ',' || CAST(id AS TEXT) || ',' AS path
+                    SELECT id, genealogy_id, 1 AS depth
                     FROM members
                     WHERE id = %s
-                    UNION ALL
-                    SELECT child.id, child.genealogy_id, branch.path || CAST(child.id AS TEXT) || ','
+                    UNION
+                    SELECT child.id, child.genealogy_id, branch.depth + 1
                     FROM branch
                     JOIN parent_child_relations rel ON rel.parent_member_id = branch.id
                     JOIN members child ON child.id = rel.child_member_id
-                    WHERE branch.path NOT LIKE '%%,' || CAST(child.id AS TEXT) || ',%%'
+                    WHERE branch.depth < 100
                 )
                 SELECT m.id, m.genealogy_id, m.name, m.gender, m.birth_year, m.death_year, m.biography, m.generation_no
                 FROM members m
