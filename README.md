@@ -155,13 +155,31 @@ data/               CSV 数据文件
 
 ## 文档索引
 
+### 综合类
+
 | 文档 | 说明 |
 |------|------|
-| [CHANGELOG.md](CHANGELOG.md) | 完整改动记录（自克隆以来所有修改） |
-| [docs/project_overview.md](docs/project_overview.md) | 项目完整文档（对照 PPT 要求） |
-| [docs/task_checklist.md](docs/task_checklist.md) | PPT 任务逐条对照清单 |
-| [docs/acceptance_guide.md](docs/acceptance_guide.md) | 验收演示指导（15 分钟路径） |
-| [docs/data_model.md](docs/data_model.md) | ER 图 + 关系模式 + 范式分析 |
-| [docs/data_pipeline.md](docs/data_pipeline.md) | 数据管道操作指南 |
-| [docs/performance_results.md](docs/performance_results.md) | 索引性能对比 (258×) |
-| [docs/demo_guide.md](docs/demo_guide.md) | 演示操作指南 |
+| [CHANGELOG.md](CHANGELOG.md) | 完整改动记录（自克隆以来所有修改，含性能优化数据） |
+| [docs/project_overview.md](docs/project_overview.md) | 项目完整文档（对照 PPT 要求，~330 行） |
+| [docs/task_checklist.md](docs/task_checklist.md) | PPT 全部任务逐条对照清单 |
+| [docs/acceptance_guide.md](docs/acceptance_guide.md) | 验收演示指导（15 分钟路径 + 话术） |
+| [docs/demo_guide.md](docs/demo_guide.md) | 演示账号与操作流程 |
+
+### 数据库设计
+
+| 文档 | 说明 |
+|------|------|
+| [docs/data_model.md](docs/data_model.md) | ER 图 + 关系模式 + 3NF 范式分析 |
+| [docs/data_pipeline.md](docs/data_pipeline.md) | 数据生成→导入→分支导出全流程操作 |
+| [docs/backup_restore.md](docs/backup_restore.md) | 数据库备份与恢复指南 |
+| [docs/performance_results.md](docs/performance_results.md) | 索引性能对比数据（258× EXPLAIN 分析） |
+
+### SQL 详解（本次会话新增）
+
+| 文档 | 说明 |
+|------|------|
+| [docs/sql_reference.md](docs/sql_reference.md) | **SQL 实现细节与设计原理** — 全部 SQL 查询的源码讲解、索引设计原理、递归 CTE 体系、亲缘链路算法架构、统计查询、约束触发器、性能总览 |
+| [docs/qa_defense.md](docs/qa_defense.md) | **答辩问答：关键技术细节** — 为什么选 PostgreSQL / 索引物理结构原理 / 每个递归 CTE 逐轮执行演示 / 分支导出功能 / 全部查询执行过程拆解 |
+| [docs/relationship_path_flow.md](docs/relationship_path_flow.md) | **亲缘链路查询全流程** — 从前端表单输入→HTTP 路由分发→Python 业务逻辑→SQL 执行→数据拼接→模板渲染回显，6 阶段逐步讲解 |
+| [docs/sql_tutorial.md](docs/sql_tutorial.md) | **SQL 语法教学（9 课）** — 以项目 SQL 为教材，从 SELECT/WHERE 到 PL/pgSQL 存储函数，每步有数据状态演示和语法拆解，面向初学者 |
+| [docs/report_outline.md](docs/report_outline.md) | 实验报告撰写提纲 |
