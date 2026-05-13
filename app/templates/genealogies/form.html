@@ -1,18 +1,29 @@
 {% extends "base.html" %}
-{% block title %}新建族谱{% endblock %}
+{% block title %}{{ "编辑族谱" if genealogy else "新建族谱" }}{% endblock %}
 {% block content %}
 <div class="form-shell">
-  <h1 class="h3 mb-3">新建族谱</h1>
+  <h1 class="h3 mb-3">{{ "编辑族谱" if genealogy else "新建族谱" }}</h1>
   <form method="post">
     <div class="mb-3">
       <label class="form-label">族谱名称</label>
       <input class="form-control" name="name" value="{{ genealogy.name if genealogy else '' }}" required>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">姓氏</label>
+        <input class="form-control" name="surname" value="{{ genealogy.surname if genealogy and genealogy.surname else '' }}" placeholder="如：赵">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">修谱年份</label>
+        <input class="form-control" type="number" name="revision_year" value="{{ genealogy.revision_year if genealogy and genealogy.revision_year else '' }}" placeholder="如：2026">
+      </div>
     </div>
     <div class="mb-3">
       <label class="form-label">简介</label>
       <textarea class="form-control" name="description" rows="4">{{ genealogy.description if genealogy else '' }}</textarea>
     </div>
     <button class="btn btn-primary" type="submit">保存</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('genealogies.detail', id=genealogy.id) if genealogy else url_for('genealogies.index') }}">返回</a>
   </form>
 </div>
 {% endblock %}

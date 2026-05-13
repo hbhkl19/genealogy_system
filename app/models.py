@@ -40,6 +40,8 @@ class Genealogy(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
+    surname = db.Column(db.String(40))
+    revision_year = db.Column(db.Integer)
     description = db.Column(db.Text)
     owner_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     created_at = db.Column(

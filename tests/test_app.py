@@ -27,6 +27,12 @@ def test_app_routes_load(app):
     assert "/register" in routes
     assert "/login" in routes
     assert "/genealogies" in routes
+    assert "/genealogies/<int:id>/edit" in routes
+    assert "/genealogies/<int:id>/delete" in routes
+    assert "/genealogies/<int:id>/tree-roots" in routes
+    assert "/genealogies/<int:id>/tree-node/<int:member_id>" in routes
+    assert "/genealogies/<int:id>/tree-node/<int:member_id>/children" in routes
+    assert "/genealogies/<int:id>/tree-node/<int:member_id>/parents" in routes
     assert "/relationship/path" in routes
     assert "/members/<int:id>/edit" in routes
     assert "/members/<int:id>/delete" in routes
@@ -111,6 +117,35 @@ def test_member_edit_and_relationship_rules(app, client):
         assert ParentChildRelation.query.filter_by(child_member_id=ids["child_id"], parent_role="father").count() == 1
 
 
+def test_genealogy_profile_edit_and_delete(app, client):
+    with app.app_context():
+        ids = seed_user_genealogy_members()
+
+    login(client)
+    response = client.post(
+        f"/genealogies/{ids['genealogy_id']}/edit",
+        data={
+            "name": "赵氏宗谱",
+            "surname": "赵",
+            "revision_year": "2026",
+            "description": "修订版",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "赵氏宗谱".encode() in response.data
+
+    with app.app_context():
+        genealogy = db.session.get(Genealogy, ids["genealogy_id"])
+        assert genealogy.surname == "赵"
+        assert genealogy.revision_year == 2026
+
+    response = client.post(f"/genealogies/{ids['genealogy_id']}/delete", follow_redirects=True)
+    assert response.status_code == 200
+    with app.app_context():
+        assert db.session.get(Genealogy, ids["genealogy_id"]) is None
+
+
 def test_marriage_is_ordered_and_not_duplicated(app, client):
     with app.app_context():
         ids = seed_user_genealogy_members()
@@ -157,11 +192,69 @@ def test_recursive_views_render_relationships(app, client):
 
     descendants = client.get(f"/members/{ids['father_id']}/descendants")
     tree = client.get(f"/genealogies/{ids['genealogy_id']}/tree")
+    tree_with_indent = client.get(f"/genealogies/{ids['genealogy_id']}/tree?show_indent=1")
     path = client.get(f"/relationship/path?a={ids['father_id']}&b={ids['mother_id']}")
 
     assert descendants.status_code == 200
     assert "孩子".encode() in descendants.data
     assert tree.status_code == 200
-    assert "孩子".encode() in tree.data
+    assert "缩进树使用递归查询".encode() in tree.data
+    assert "孩子".encode() not in tree.data
+    assert tree_with_indent.status_code == 200
+    assert "孩子".encode() in tree_with_indent.data
     assert path.status_code == 200
     assert "配偶".encode() in path.data
+
+
+def test_lazy_tree_json_endpoints(app, client):
+    with app.app_context():
+        ids = seed_user_genealogy_members()
+        db.session.add(
+            ParentChildRelation(
+                genealogy_id=ids["genealogy_id"],
+                parent_member_id=ids["father_id"],
+                child_member_id=ids["child_id"],
+                parent_role="father",
+            )
+        )
+        db.session.add(
+            ParentChildRelation(
+                genealogy_id=ids["genealogy_id"],
+                parent_member_id=ids["mother_id"],
+                child_member_id=ids["child_id"],
+                parent_role="mother",
+            )
+        )
+        other_user = User(username="other", email="other@example.com")
+        other_user.set_password("secret")
+        other_genealogy = Genealogy(name="其他族谱", owner=other_user)
+        other_member = Member(name="外族成员", gender="unknown", generation_no=1, genealogy=other_genealogy)
+        db.session.add_all([other_user, other_genealogy, other_member])
+        db.session.commit()
+        other_member_id = other_member.id
+
+    unauthenticated = client.get(f"/genealogies/{ids['genealogy_id']}/tree-roots")
+    assert unauthenticated.status_code == 302
+
+    login(client)
+
+    roots = client.get(f"/genealogies/{ids['genealogy_id']}/tree-roots")
+    assert roots.status_code == 200
+    root_ids = {member["id"] for member in roots.json["members"]}
+    assert ids["father_id"] in root_ids
+    assert ids["child_id"] not in root_ids
+
+    focused = client.get(f"/genealogies/{ids['genealogy_id']}/tree-node/{ids['child_id']}")
+    assert focused.status_code == 200
+    assert focused.json["member"]["has_parents"] is True
+
+    children = client.get(f"/genealogies/{ids['genealogy_id']}/tree-node/{ids['father_id']}/children")
+    assert children.status_code == 200
+    assert [member["id"] for member in children.json["members"]] == [ids["child_id"]]
+
+    parents = client.get(f"/genealogies/{ids['genealogy_id']}/tree-node/{ids['child_id']}/parents")
+    assert parents.status_code == 200
+    assert {member["id"] for member in parents.json["members"]} == {ids["father_id"], ids["mother_id"]}
+
+    cross_genealogy = client.get(f"/genealogies/{ids['genealogy_id']}/tree-node/{other_member_id}")
+    assert cross_genealogy.status_code == 404

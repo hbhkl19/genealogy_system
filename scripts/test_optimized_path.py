@@ -87,11 +87,12 @@ with app.app_context():
     t0 = time.perf_counter()
     try:
         r = db.session.execute(text(
-            "SELECT COUNT(*) FROM bfs_reachable(:g, :r, :d)"
+            "SELECT COUNT(*) FROM bfs_reachable(CAST(:g AS INTEGER), CAST(:r AS INTEGER), CAST(:d AS INTEGER))"
         ), {"g": gid, "r": 1, "d": 1}).fetchone()
         print(f"  bfs_reachable() 可用 (测试返回 {r[0]} 行, {(time.perf_counter()-t0)*1000:.0f}ms)")
     except Exception as e:
         print(f"  bfs_reachable() 不可用, 将使用 CTE 回退: {e}")
+        db.session.rollback()
 
     # --- Step 2: raw BFS timing at various depths ---
     print("\n[1] 单节点 BFS 各深度耗时对比")
@@ -109,7 +110,7 @@ with app.app_context():
         try:
             t0 = time.perf_counter()
             rows = db.session.execute(text(
-                "SELECT member_id, depth FROM bfs_reachable(:g, :r, :d)"
+                "SELECT member_id, depth FROM bfs_reachable(CAST(:g AS INTEGER), CAST(:r AS INTEGER), CAST(:d AS INTEGER))"
             ), {"g": gid, "r": 1, "d": depth}).fetchall()
             func_result = {r[0]: r[1] for r in rows}
             func_t = (time.perf_counter() - t0) * 1000

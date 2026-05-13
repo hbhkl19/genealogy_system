@@ -40,10 +40,13 @@ def get_or_create_user() -> User:
 def create_demo_genealogy(user: User) -> Genealogy:
     existing = Genealogy.query.filter_by(owner_id=user.id, name="演示族谱").first()
     if existing:
-        return existing
+        db.session.delete(existing)
+        db.session.flush()
 
     genealogy = Genealogy(
         name="演示族谱",
+        surname="赵",
+        revision_year=2026,
         description="赵氏家族五代演示数据，含真实姓名、生卒年、婚姻与血缘关系，用于课堂 SQL 查询演示。",
         owner=user,
     )
@@ -57,9 +60,9 @@ def create_demo_genealogy(user: User) -> Genealogy:
     g1_f = Member(genealogy=genealogy, name="陈秀英", gender="female",
                   birth_year=1923, death_year=2008, generation_no=1,
                   biography="赵氏曾祖母，擅长纺织，邻里称贤。")
-    g1_u = Member(genealogy=genealogy, name="赵德广", gender="male",
-                  birth_year=1925, death_year=2015, generation_no=1,
-                  biography="赵德厚之弟，终身未婚，以木匠手艺闻名乡里。")
+    g1_u = Member(genealogy=genealogy, name="赵明仁", gender="male",
+                  birth_year=1947, death_year=2022, generation_no=2,
+                  biography="赵德厚次子，终身未婚，以木匠手艺闻名乡里。")
 
     # ── Generation 2 (祖) ──
     g2_a1 = Member(genealogy=genealogy, name="赵明礼", gender="male",
@@ -132,9 +135,11 @@ def create_demo_genealogy(user: User) -> Genealogy:
 
     # ── Parent-Child Relations ──
     rels = [
-        # 赵德厚 + 陈秀英 → 赵明礼, 赵明义
+        # 赵德厚 + 陈秀英 → 赵明礼, 赵明仁, 赵明义
         ParentChildRelation(genealogy_id=genealogy.id, parent_member_id=g1_m.id, child_member_id=g2_a1.id, parent_role="father"),
         ParentChildRelation(genealogy_id=genealogy.id, parent_member_id=g1_f.id, child_member_id=g2_a1.id, parent_role="mother"),
+        ParentChildRelation(genealogy_id=genealogy.id, parent_member_id=g1_m.id, child_member_id=g1_u.id, parent_role="father"),
+        ParentChildRelation(genealogy_id=genealogy.id, parent_member_id=g1_f.id, child_member_id=g1_u.id, parent_role="mother"),
         ParentChildRelation(genealogy_id=genealogy.id, parent_member_id=g1_m.id, child_member_id=g2_b1.id, parent_role="father"),
         ParentChildRelation(genealogy_id=genealogy.id, parent_member_id=g1_f.id, child_member_id=g2_b1.id, parent_role="mother"),
         # 赵明礼 + 王兰芳 → 赵建国

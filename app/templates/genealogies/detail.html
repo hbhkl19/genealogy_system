@@ -4,9 +4,14 @@
 <div class="d-flex align-items-start justify-content-between gap-3 mb-4">
   <div>
     <h1 class="h3">{{ genealogy.name }}</h1>
+    <div class="text-secondary small mb-2">
+      姓氏：{{ genealogy.surname or "未填" }}
+      {% if genealogy.revision_year %}<span class="ms-2">修谱年份：{{ genealogy.revision_year }}</span>{% endif %}
+    </div>
     <p class="text-secondary mb-0">{{ genealogy.description or "暂无简介" }}</p>
   </div>
   <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('genealogies.edit', id=genealogy.id) }}">编辑族谱</a>
     <a class="btn btn-outline-secondary" href="{{ url_for('genealogies.invite', id=genealogy.id) }}">邀请协作者</a>
     <a class="btn btn-primary" href="{{ url_for('members.create', genealogy_id=genealogy.id) }}">添加成员</a>
   </div>
@@ -31,4 +36,10 @@
   <a class="list-group-item list-group-item-action" href="{{ url_for('genealogies.export', id=genealogy.id) }}">导出成员
     CSV</a>
 </div>
+{% if genealogy.owner_id == current_user.id %}
+<form class="mt-4" method="post" action="{{ url_for('genealogies.delete', id=genealogy.id) }}"
+  onsubmit="return confirm('确定删除该族谱及全部成员关系吗？')">
+  <button class="btn btn-outline-danger" type="submit">删除族谱</button>
+</form>
+{% endif %}
 {% endblock %}

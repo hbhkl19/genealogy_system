@@ -1,11 +1,12 @@
 # 寻根溯源族谱管理系统
 
-这是一个面向课程实验的族谱管理系统，默认技术栈为 `Flask + Jinja2 + Bootstrap + SQLAlchemy + PostgreSQL 16`。当前版本已搭好可运行的大致框架，后续可以按阶段继续补充大规模数据生成、完整关系维护、性能实验和报告材料。
+这是一个面向课程实验的族谱管理系统，默认技术栈为 `Flask + Jinja2 + Bootstrap + SQLAlchemy + PostgreSQL 16`。当前版本已覆盖课程验收所需的应用界面、数据库建模、模拟数据、导入导出、递归 SQL、索引优化和报告材料骨架。
 
 ## 主要功能
 
 - 用户注册、登录、退出和登录拦截。
-- 多族谱管理：创建族谱、查看自己创建或受邀参与的族谱。
+- 多族谱管理：创建、编辑、删除族谱，查看自己创建或受邀参与的族谱。
+- 族谱基本信息：谱名、姓氏、修谱年份、简介、创建用户。
 - 协作者邀请：族谱创建者可通过邮箱邀请其他用户参与（viewer/editor 角色）。
 - 成员管理：添加/编辑/删除成员、按姓名模糊搜索（GIN trigram 索引加速）、分页。
 - 关系管理：添加父母、配偶、子女关系。
@@ -164,8 +165,8 @@ data/               CSV 数据文件
 - `.vscode/settings.json` 已配置 Python 解释器、pytest 和 SQLTools 连接。
 - 已补充 `.vscode/extensions.json`、`.vscode/launch.json`、`.vscode/tasks.json`。
 - 已接入 Flask-Migrate，首个迁移版本位于 `migrations/versions/`。
-- 当前目录不是 Git 仓库，如需要版本管理可执行 `git init`。
-- `rg` 在当前环境中运行时报 `Access is denied`，检查文件时已改用 PowerShell 原生命令。
+- 当前目录已是 Git 仓库。
+- 当前数据库迁移版本应为 `a7c9d2f4b601 (head)`。
 
 ## 文档索引
 

@@ -25,6 +25,66 @@ def get_accessible_genealogy(genealogy_id):
     return genealogy
 
 
+def parse_optional_int(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    return int(value)
+
+
+def update_genealogy_from_form(genealogy):
+    genealogy.name = request.form.get("name", "").strip()
+    genealogy.surname = request.form.get("surname", "").strip() or None
+    genealogy.revision_year = parse_optional_int(request.form.get("revision_year"))
+    genealogy.description = request.form.get("description", "").strip()
+
+
+def member_payload(member):
+    has_children = db.session.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM parent_child_relations
+                WHERE genealogy_id = :genealogy_id
+                  AND parent_member_id = :member_id
+            )
+            """
+        ),
+        {"genealogy_id": member.genealogy_id, "member_id": member.id},
+    ).scalar()
+    has_parents = db.session.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM parent_child_relations
+                WHERE genealogy_id = :genealogy_id
+                  AND child_member_id = :member_id
+            )
+            """
+        ),
+        {"genealogy_id": member.genealogy_id, "member_id": member.id},
+    ).scalar()
+    return {
+        "id": member.id,
+        "name": member.name,
+        "gender": member.gender,
+        "birth_year": member.birth_year,
+        "death_year": member.death_year,
+        "generation_no": member.generation_no,
+        "has_children": bool(has_children),
+        "has_parents": bool(has_parents),
+    }
+
+
+def get_genealogy_member_or_404(genealogy_id, member_id):
+    member = Member.query.filter_by(id=member_id, genealogy_id=genealogy_id).first()
+    if member is None:
+        abort(404)
+    return member
+
+
 @bp.route("")
 @login_required
 def index():
@@ -36,17 +96,43 @@ def index():
 @login_required
 def create():
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        description = request.form.get("description", "").strip()
-        if not name:
+        genealogy = Genealogy(owner=current_user)
+        update_genealogy_from_form(genealogy)
+        if not genealogy.name:
             flash("族谱名称不能为空。", "warning")
             return render_template("genealogies/form.html", genealogy=None)
-        genealogy = Genealogy(name=name, description=description, owner=current_user)
         db.session.add(genealogy)
         db.session.commit()
         flash("族谱已创建。", "success")
         return redirect(url_for("genealogies.detail", id=genealogy.id))
     return render_template("genealogies/form.html", genealogy=None)
+
+
+@bp.route("/<int:id>/edit", methods=["GET", "POST"])
+@login_required
+def edit(id):
+    genealogy = get_accessible_genealogy(id)
+    if request.method == "POST":
+        update_genealogy_from_form(genealogy)
+        if not genealogy.name:
+            flash("族谱名称不能为空。", "warning")
+            return render_template("genealogies/form.html", genealogy=genealogy)
+        db.session.commit()
+        flash("族谱信息已更新。", "success")
+        return redirect(url_for("genealogies.detail", id=genealogy.id))
+    return render_template("genealogies/form.html", genealogy=genealogy)
+
+
+@bp.route("/<int:id>/delete", methods=["POST"])
+@login_required
+def delete(id):
+    genealogy = get_accessible_genealogy(id)
+    if genealogy.owner_id != current_user.id:
+        abort(403)
+    db.session.delete(genealogy)
+    db.session.commit()
+    flash("族谱已删除，成员和关系已同步移除。", "success")
+    return redirect(url_for("genealogies.index"))
 
 
 @bp.route("/<int:id>")

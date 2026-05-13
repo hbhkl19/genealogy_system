@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 COPY_ORDER = [
     ("users", ["id", "username", "email", "password_hash"]),
-    ("genealogies", ["id", "name", "description", "owner_id"]),
+    ("genealogies", ["id", "name", "surname", "revision_year", "description", "owner_id"]),
     ("genealogy_collaborators", ["id", "genealogy_id", "user_id", "role"]),
     ("members", ["id", "genealogy_id", "name", "gender", "birth_year", "death_year", "biography", "generation_no"]),
     (
