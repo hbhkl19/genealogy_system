@@ -298,6 +298,71 @@ def tree_children(id, member_id):
     })
 
 
+@bp.route("/<int:id>/tree-roots")
+@login_required
+def svg_tree_roots(id):
+    get_accessible_genealogy(id)
+    limit = min(request.args.get("limit", 50, type=int) or 50, 50)
+    roots = (
+        Member.query.filter(Member.genealogy_id == id)
+        .filter(
+            ~ParentChildRelation.query.filter(
+                ParentChildRelation.genealogy_id == id,
+                ParentChildRelation.child_member_id == Member.id,
+            ).exists()
+        )
+        .order_by(Member.generation_no, Member.id)
+        .limit(limit)
+        .all()
+    )
+    return jsonify({"members": [member_payload(member) for member in roots]})
+
+
+@bp.route("/<int:id>/tree-node/<int:member_id>")
+@login_required
+def svg_tree_node(id, member_id):
+    get_accessible_genealogy(id)
+    member = get_genealogy_member_or_404(id, member_id)
+    return jsonify({"member": member_payload(member)})
+
+
+@bp.route("/<int:id>/tree-node/<int:member_id>/children")
+@login_required
+def svg_tree_node_children(id, member_id):
+    get_accessible_genealogy(id)
+    get_genealogy_member_or_404(id, member_id)
+    limit = min(request.args.get("limit", 100, type=int) or 100, 100)
+    children = (
+        Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)
+        .filter(
+            ParentChildRelation.genealogy_id == id,
+            ParentChildRelation.parent_member_id == member_id,
+        )
+        .order_by(Member.generation_no, Member.id)
+        .limit(limit)
+        .all()
+    )
+    return jsonify({"members": [member_payload(member) for member in children]})
+
+
+@bp.route("/<int:id>/tree-node/<int:member_id>/parents")
+@login_required
+def svg_tree_node_parents(id, member_id):
+    get_accessible_genealogy(id)
+    get_genealogy_member_or_404(id, member_id)
+    parents = (
+        Member.query.join(ParentChildRelation, ParentChildRelation.parent_member_id == Member.id)
+        .filter(
+            ParentChildRelation.genealogy_id == id,
+            ParentChildRelation.child_member_id == member_id,
+        )
+        .order_by(ParentChildRelation.parent_role, Member.id)
+        .limit(2)
+        .all()
+    )
+    return jsonify({"members": [member_payload(member) for member in parents]})
+
+
 @bp.route("/<int:id>/statistics")
 @login_required
 def statistics(id):

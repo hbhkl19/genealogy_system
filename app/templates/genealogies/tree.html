@@ -2,23 +2,67 @@
 {% block title %}树形预览{% endblock %}
 {% block content %}
 <h1 class="h3 mb-1">{{ genealogy.name }}树形预览</h1>
-<p class="text-secondary mb-3" id="tree-info">点击 <strong>[+]</strong> 展开分支，按需加载</p>
 
-<div class="tree-toolbar mb-3">
-  <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">全部折叠</button>
-  <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(2)">展开到第 2 代</button>
-  <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(3)">展开到第 3 代</button>
-  <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(5)">展开到第 5 代</button>
-</div>
+<ul class="nav nav-tabs mb-3" id="treeTab" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="indent-tab" data-bs-toggle="tab" data-bs-target="#indent-panel" type="button" role="tab">缩进树</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="svg-tab" data-bs-toggle="tab" data-bs-target="#svg-panel" type="button" role="tab">图形树</button>
+  </li>
+</ul>
 
-<div class="tree-container" id="tree-container">
-  <div class="tree-loading">加载中...</div>
+<div class="tab-content" id="treeTabContent">
+  <div class="tab-pane fade show active" id="indent-panel" role="tabpanel">
+    <p class="text-secondary mb-3" id="tree-info">点击 <strong>[+]</strong> 展开分支，按需加载</p>
+
+    <div class="tree-toolbar mb-3">
+      <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">全部折叠</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(2)">展开到第 2 代</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(3)">展开到第 3 代</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(5)">展开到第 5 代</button>
+    </div>
+
+    <div class="tree-container" id="tree-container">
+      <div class="tree-loading">加载中...</div>
+    </div>
+  </div>
+
+  <div class="tab-pane fade" id="svg-panel" role="tabpanel">
+    <section class="lazy-tree-panel">
+      <div class="lazy-tree-toolbar">
+        <button class="btn btn-primary" type="button" id="loadRootsButton">加载根成员</button>
+        <div class="lazy-tree-search">
+          <input class="form-control" id="focusMemberInput" type="number" min="1" placeholder="输入成员 ID 定位">
+          <button class="btn btn-outline-secondary" type="button" id="focusMemberButton">定位</button>
+        </div>
+        <button class="btn btn-outline-secondary" type="button" id="clearTreeButton">清空画布</button>
+      </div>
+      <div class="lazy-tree-status" id="lazyTreeStatus">图形树不会一次性加载全族谱，请先加载根成员或输入成员 ID 定位。</div>
+      <div class="lazy-tree-canvas" id="lazyTreeCanvas">
+        <svg id="lazyTreeSvg" width="960" height="420" role="img" aria-label="懒加载图形族谱树"></svg>
+      </div>
+    </section>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
   const gid = {{ genealogy.id }};
+
+  (function () {
+    var indentTab = document.getElementById('indent-tab');
+    var svgTab = document.getElementById('svg-tab');
+    var svgInitialized = false;
+
+    svgTab.addEventListener('shown.bs.tab', function () {
+      if (!svgInitialized) {
+        initSvgTree();
+        svgInitialized = true;
+      }
+    });
+  })();
 
   function buildNodeHtml(member, depth, hasChildren, spouses) {
     const indent = depth * 24;
@@ -188,5 +232,225 @@
       document.getElementById('tree-container').innerHTML = '<div class="tree-empty">加载失败。</div>';
       console.error(err);
     });
+
+  function initSvgTree() {
+    const nodeLimit = 500;
+    const nodeWidth = 168;
+    const nodeHeight = 74;
+    const columnGap = 220;
+    const rowGap = 112;
+    const svg = document.getElementById("lazyTreeSvg");
+    const status = document.getElementById("lazyTreeStatus");
+    const nodes = new Map();
+    const edges = new Set();
+    const expandedChildren = new Set();
+    const expandedParents = new Set();
+    let activeNodeId = null;
+
+    function setStatus(message, kind) {
+      kind = kind || "info";
+      status.textContent = message;
+      status.dataset.kind = kind;
+    }
+
+    function escapeText(value) {
+      return String(value || "").replace(/[&<>"']/g, function (char) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char];
+      });
+    }
+
+    async function getJson(url) {
+      const response = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return response.json();
+    }
+
+    function addNode(member) {
+      if (nodes.has(member.id)) {
+        nodes.set(member.id, Object.assign({}, nodes.get(member.id), member));
+        return false;
+      }
+      if (nodes.size >= nodeLimit) {
+        setStatus("当前可视节点已达到 500 个，请清空画布后通过成员 ID 定位继续查看。", "warning");
+        return false;
+      }
+      nodes.set(member.id, member);
+      return true;
+    }
+
+    function addEdge(parentId, childId) {
+      if (nodes.has(parentId) && nodes.has(childId)) {
+        edges.add(parentId + "->" + childId);
+      }
+    }
+
+    function clearTree() {
+      nodes.clear();
+      edges.clear();
+      expandedChildren.clear();
+      expandedParents.clear();
+      activeNodeId = null;
+      draw();
+      setStatus("画布已清空。");
+    }
+
+    function groupedNodes() {
+      const groups = new Map();
+      for (const node of nodes.values()) {
+        const generation = node.generation_no || 1;
+        if (!groups.has(generation)) {
+          groups.set(generation, []);
+        }
+        groups.get(generation).push(node);
+      }
+      return Array.from(groups.entries())
+        .sort(function (a, b) { return a[0] - b[0]; })
+        .map(function (entry) {
+          return [entry[0], entry[1].sort(function (a, b) { return a.id - b.id; })];
+        });
+    }
+
+    function layoutNodes() {
+      const positions = new Map();
+      const groups = groupedNodes();
+      groups.forEach(function (pair) {
+        var generation = pair[0];
+        var members = pair[1];
+        var columnIndex = groups.findIndex(function (g) { return g[0] === generation; });
+        members.forEach(function (member, rowIndex) {
+          positions.set(member.id, {
+            x: 28 + columnIndex * columnGap,
+            y: 28 + rowIndex * rowGap,
+            generation: generation,
+          });
+        });
+      });
+      const maxRows = Math.max.apply(null, [1].concat(groups.map(function (pair) { return pair[1].length; })));
+      svg.setAttribute("width", Math.max(960, 72 + groups.length * columnGap));
+      svg.setAttribute("height", Math.max(420, 80 + maxRows * rowGap));
+      return positions;
+    }
+
+    function draw() {
+      const positions = layoutNodes();
+      const edgeMarkup = Array.from(edges).map(function (edgeKey) {
+        var parts = edgeKey.split("->");
+        var parentId = Number(parts[0]);
+        var childId = Number(parts[1]);
+        const parent = positions.get(parentId);
+        const child = positions.get(childId);
+        if (!parent || !child) return "";
+        const x1 = parent.x + nodeWidth;
+        const y1 = parent.y + nodeHeight / 2;
+        const x2 = child.x;
+        const y2 = child.y + nodeHeight / 2;
+        return '<line class="lazy-tree-edge" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"></line>';
+      }).join("");
+
+      const nodeMarkup = Array.from(nodes.values()).map(function (node) {
+        const pos = positions.get(node.id);
+        const genderClass = "gender-" + (node.gender || "unknown");
+        const activeClass = node.id === activeNodeId ? " is-active" : "";
+        const canExpandParents = node.has_parents ? "" : " is-disabled";
+        const canExpandChildren = node.has_children ? "" : " is-disabled";
+        return '<g class="lazy-tree-node ' + genderClass + activeClass + '" transform="translate(' + pos.x + ', ' + pos.y + ')">'
+          + '<rect width="' + nodeWidth + '" height="' + nodeHeight + '" rx="8"></rect>'
+          + '<text class="lazy-tree-name" x="12" y="24">' + escapeText(node.name) + '</text>'
+          + '<text class="lazy-tree-meta" x="12" y="46">#' + node.id + ' · 第' + (node.generation_no || "") + '代</text>'
+          + '<a href="/members/' + node.id + '/relations" target="_blank">'
+          + '<g class="lazy-tree-action" transform="translate(86, 50)">'
+          + '<rect width="22" height="18" rx="4"></rect>'
+          + '<text x="5" y="13">🔗</text>'
+          + '</g></a>'
+          + '<g class="lazy-tree-action' + canExpandParents + '" data-action="parents" data-id="' + node.id + '" transform="translate(112, 50)">'
+          + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">↑</text></g>'
+          + '<g class="lazy-tree-action' + canExpandChildren + '" data-action="children" data-id="' + node.id + '" transform="translate(138, 50)">'
+          + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">↓</text></g>'
+          + '</g>';
+      }).join("");
+
+      svg.innerHTML = edgeMarkup + nodeMarkup;
+    }
+
+    async function loadRoots() {
+      try {
+        setStatus("正在加载根成员...");
+        const data = await getJson("/genealogies/" + gid + "/tree-roots");
+        data.members.forEach(addNode);
+        activeNodeId = data.members[0] ? data.members[0].id : null;
+        draw();
+        var msg = "已加载 " + data.members.length + " 个根成员";
+        if (activeNodeId) msg += "，点击节点右下角箭头继续展开。";
+        setStatus(msg);
+      } catch (error) {
+        setStatus("根成员加载失败：" + error.message, "danger");
+      }
+    }
+
+    async function focusMember() {
+      const memberId = Number(document.getElementById("focusMemberInput").value);
+      if (!memberId) {
+        setStatus("请输入有效的成员 ID。", "warning");
+        return;
+      }
+      try {
+        setStatus("正在定位成员...");
+        const data = await getJson("/genealogies/" + gid + "/tree-node/" + memberId);
+        addNode(data.member);
+        activeNodeId = data.member.id;
+        draw();
+        setStatus("已定位到 " + data.member.name + " #" + data.member.id + "，可继续向上或向下展开。");
+      } catch (error) {
+        setStatus("成员定位失败：请确认该 ID 属于当前族谱。", "danger");
+      }
+    }
+
+    async function expandNode(memberId, direction) {
+      const loadedSet = direction === "children" ? expandedChildren : expandedParents;
+      if (loadedSet.has(memberId)) {
+        setStatus("该方向已经展开过。");
+        return;
+      }
+      try {
+        activeNodeId = memberId;
+        setStatus("正在加载相邻成员...");
+        const data = await getJson("/genealogies/" + gid + "/tree-node/" + memberId + "/" + direction);
+        data.members.forEach(function (member) {
+          addNode(member);
+          if (direction === "children") {
+            addEdge(memberId, member.id);
+          } else {
+            addEdge(member.id, memberId);
+          }
+        });
+        loadedSet.add(memberId);
+        draw();
+        var dirLabel = direction === "children" ? "子女" : "父母";
+        setStatus("已加载 " + data.members.length + " 个" + dirLabel + "节点。当前可视节点：" + nodes.size + "/" + nodeLimit + "。");
+      } catch (error) {
+        setStatus("节点展开失败：" + error.message, "danger");
+      }
+    }
+
+    svg.addEventListener("click", function (event) {
+      const target = event.target.closest(".lazy-tree-action");
+      if (!target || target.classList.contains("is-disabled")) return;
+      expandNode(Number(target.dataset.id), target.dataset.action);
+    });
+
+    document.getElementById("loadRootsButton").addEventListener("click", loadRoots);
+    document.getElementById("focusMemberButton").addEventListener("click", focusMember);
+    document.getElementById("clearTreeButton").addEventListener("click", clearTree);
+    document.getElementById("focusMemberInput").addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        focusMember();
+      }
+    });
+
+    draw();
+  }
 </script>
 {% endblock %}
