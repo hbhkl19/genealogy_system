@@ -56,6 +56,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Import generated CSV files into PostgreSQL.")
     parser.add_argument("--input-dir", default="data/generated", help="Directory containing generated CSV files.")
     parser.add_argument("--truncate", action="store_true", help="Truncate target tables before import.")
+    parser.add_argument("--skip-users", action="store_true", help="Skip users.csv (existing users already in DB).")
+    parser.add_argument("--append", action="store_true", default=True,
+                        help="Append mode: skip missing files, don't truncate (default).")
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -76,13 +79,22 @@ def main() -> None:
                 )
 
             for table, columns in COPY_ORDER:
+                if args.skip_users and table == "users":
+                    print(f"skipped users (--skip-users)")
+                    continue
                 csv_path = input_dir / f"{table}.csv"
                 if not csv_path.exists():
+                    if args.append:
+                        print(f"skipped {csv_path} (file not found, append mode)")
+                        continue
                     raise FileNotFoundError(csv_path)
                 copy_file(cursor, table, columns, csv_path)
                 print(f"imported {csv_path}")
 
             for table, _columns in COPY_ORDER:
+                csv_path = input_dir / f"{table}.csv"
+                if not csv_path.exists():
+                    continue
                 reset_sequence(cursor, table)
 
     print("CSV import complete.")

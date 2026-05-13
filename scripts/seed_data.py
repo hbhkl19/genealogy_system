@@ -1,11 +1,15 @@
-"""Generate large genealogy CSV fixtures for PostgreSQL COPY import.
+"""Generate realistic Chinese genealogy CSV data for PostgreSQL COPY import.
 
-Default output satisfies the course data requirement:
-- at least 10 genealogies
-- at least 100000 members
-- one genealogy with at least 50000 members
-- at least 30 generations
-- every member has at least one marriage or blood relation edge
+Design principles:
+- Each genealogy represents one patrilineal lineage with a fixed surname
+- All marriages are inter-genealogy (avoids close-relative marriage)
+- Children belong to the father's genealogy and carry the father's surname
+- Generational growth follows a geometric progression from a few founders
+
+Default output:
+- 10 genealogies with distinct surnames
+- ~110000 total members (50000 + 9×6000)
+- 30 generations
 """
 
 from __future__ import annotations
@@ -20,11 +24,17 @@ from faker import Faker
 
 
 DEFAULT_SIZES = [50000] + [6000] * 9
-UNMARRIED_RATE = 0.08
 BIRTH_SPREAD = 5
 LIFESPAN_MIN = 55
 LIFESPAN_MAX = 92
 RECENT_GENERATIONS_ALIVE = 5
+
+SURNAMES = [
+    "张", "李", "王", "赵", "陈",
+    "刘", "杨", "黄", "周", "吴",
+    "徐", "孙", "马", "朱", "胡",
+    "郭", "何", "高", "林", "罗",
+]
 
 CSV_FILES = {
     "users": "users.csv",
@@ -42,34 +52,52 @@ class Counters:
     parent_child_id: int = 1
     marriage_id: int = 1
 
-
-def even_generation_counts(total: int, generations: int) -> list[int]:
-    if total < generations * 2:
-        raise ValueError("total must allow at least two members per generation")
-
-    base = total // generations
-    if base % 2:
-        base -= 1
-    counts = [base] * generations
-    remaining = total - sum(counts)
-    index = 0
-    while remaining > 0:
-        counts[index % generations] += 2
-        remaining -= 2
-        index += 1
-    return counts
+    @classmethod
+    def with_offset(cls, offset: int) -> "Counters":
+        return cls(member_id=1 + offset, parent_child_id=1 + offset, marriage_id=1 + offset)
 
 
-def open_writer(output_dir: Path, name: str, fieldnames: list[str]):
-    output_dir.mkdir(parents=True, exist_ok=True)
-    handle = (output_dir / CSV_FILES[name]).open("w", newline="", encoding="utf-8")
-    writer = csv.DictWriter(handle, fieldnames=fieldnames)
-    writer.writeheader()
-    return handle, writer
+def generation_targets(total_members: int, num_generations: int, founder_count: int = 8) -> list[int]:
+    """Calculate target member counts per generation using geometric progression.
 
+    Finds growth rate r such that:
+      founder_count * (1 + r + r^2 + ... + r^(G-1)) ≈ total_members
 
-def member_name(fake: Faker, genealogy_index: int, generation_no: int, local_index: int) -> str:
-    return f"G{genealogy_index:02d}-G{generation_no:02d}-{local_index:04d} {fake.name()}"
+    Returns a list of length num_generations with integer member counts.
+    """
+    lo, hi = 0.5, 2.5
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        total = founder_count * sum(mid ** i for i in range(num_generations))
+        if total < total_members:
+            lo = mid
+        else:
+            hi = mid
+    r = (lo + hi) / 2
+
+    targets = [max(2, int(founder_count * r ** i + 0.5)) for i in range(num_generations)]
+    targets[0] = founder_count
+
+    diff = total_members - sum(targets)
+    if diff > 0:
+        per_gen = max(1, diff // num_generations)
+        for i in range(num_generations):
+            add = min(per_gen, diff)
+            targets[i] += add
+            diff -= add
+            if diff <= 0:
+                break
+    elif diff < 0:
+        per_gen = max(1, -diff // num_generations)
+        for i in range(num_generations - 1, -1, -1):
+            sub = min(per_gen, -diff)
+            if targets[i] - sub >= 2:
+                targets[i] -= sub
+                diff += sub
+            if diff >= 0:
+                break
+
+    return targets
 
 
 def birth_year_for(generation_no: int, rng: random.Random) -> int:
@@ -85,178 +113,239 @@ def death_year_for(birth_year: int, generation_no: int, total_generations: int, 
     return birth_year + lifespan
 
 
-def write_members_for_genealogy(
-    *,
-    fake: Faker,
-    rng: random.Random,
-    genealogy_id: int,
-    genealogy_index: int,
-    target_size: int,
+def given_name(fake: Faker, gender: str) -> str:
+    """Generate a given name (without surname) appropriate for the gender."""
+    full = fake.name()
+    if len(full) >= 2:
+        return full[1:] if len(full) <= 3 else full[0:2]
+    return full
+
+
+def open_writer(output_dir: Path, name: str, fieldnames: list[str]):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle = (output_dir / CSV_FILES[name]).open("w", newline="", encoding="utf-8")
+    writer = csv.DictWriter(handle, fieldnames=fieldnames)
+    writer.writeheader()
+    return handle, writer
+
+
+def generate_dataset(
+    output_dir: Path,
+    sizes: list[int],
     generations: int,
-    counters: Counters,
-    members_writer: csv.DictWriter,
-    parent_child_writer: csv.DictWriter,
-    marriages_writer: csv.DictWriter,
-) -> None:
-    generation_counts = even_generation_counts(target_size, generations)
-    previous_couples: list[tuple[int, int]] = []
-
-    for generation_no, generation_size in enumerate(generation_counts, start=1):
-        current_members: list[int] = []
-
-        for local_index in range(generation_size):
-            member_id = counters.member_id
-            counters.member_id += 1
-            gender = "male" if local_index % 2 == 0 else "female"
-            birth_year = birth_year_for(generation_no, rng)
-            death_year = death_year_for(birth_year, generation_no, generations, rng)
-            biography = (
-                f"第 {generation_no} 代成员"
-                + (f"，生于 {birth_year}" if birth_year else "")
-                + (f"，卒于 {death_year}" if death_year else "")
-                + "。"
-            )
-            members_writer.writerow(
-                {
-                    "id": member_id,
-                    "genealogy_id": genealogy_id,
-                    "name": member_name(fake, genealogy_index, generation_no, local_index + 1),
-                    "gender": gender,
-                    "birth_year": birth_year,
-                    "death_year": death_year,
-                    "biography": biography,
-                    "generation_no": generation_no,
-                }
-            )
-            current_members.append(member_id)
-
-            if previous_couples:
-                father_id, mother_id = previous_couples[local_index % len(previous_couples)]
-                parent_child_writer.writerow(
-                    {
-                        "id": counters.parent_child_id,
-                        "genealogy_id": genealogy_id,
-                        "parent_member_id": father_id,
-                        "child_member_id": member_id,
-                        "parent_role": "father",
-                    }
-                )
-                counters.parent_child_id += 1
-                parent_child_writer.writerow(
-                    {
-                        "id": counters.parent_child_id,
-                        "genealogy_id": genealogy_id,
-                        "parent_member_id": mother_id,
-                        "child_member_id": member_id,
-                        "parent_role": "mother",
-                    }
-                )
-                counters.parent_child_id += 1
-
-        current_couples: list[tuple[int, int]] = []
-        for index in range(0, len(current_members), 2):
-            spouse1_id = current_members[index]
-            spouse2_id = current_members[index + 1]
-
-            if generation_no == 1 or rng.random() >= UNMARRIED_RATE:
-                current_couples.append((spouse1_id, spouse2_id))
-                married_year = birth_year_for(generation_no, rng) + rng.randint(22, 28)
-                marriages_writer.writerow(
-                {
-                    "id": counters.marriage_id,
-                    "genealogy_id": genealogy_id,
-                    "spouse1_member_id": min(spouse1_id, spouse2_id),
-                    "spouse2_member_id": max(spouse1_id, spouse2_id),
-                    "married_year": married_year,
-                    "ended_year": "",
-                }
-            )
-            counters.marriage_id += 1
-
-        previous_couples = current_couples
-
-
-def generate_dataset(output_dir: Path, sizes: list[int], generations: int, seed: int) -> dict[str, int]:
+    seed: int,
+    id_offset: int = 0,
+    skip_users: bool = False,
+) -> dict[str, int]:
     fake = Faker("zh_CN")
     Faker.seed(seed)
     rng = random.Random(seed)
-    counters = Counters()
+    counters = Counters.with_offset(id_offset)
+
+    num_genealogies = len(sizes)
 
     handles = []
     try:
         users_handle, users_writer = open_writer(output_dir, "users", ["id", "username", "email", "password_hash"])
         genealogies_handle, genealogies_writer = open_writer(
-            output_dir,
-            "genealogies",
-            ["id", "name", "description", "owner_id"],
+            output_dir, "genealogies", ["id", "name", "description", "owner_id"],
         )
         members_handle, members_writer = open_writer(
-            output_dir,
-            "members",
+            output_dir, "members",
             ["id", "genealogy_id", "name", "gender", "birth_year", "death_year", "biography", "generation_no"],
         )
         parent_child_handle, parent_child_writer = open_writer(
-            output_dir,
-            "parent_child_relations",
+            output_dir, "parent_child_relations",
             ["id", "genealogy_id", "parent_member_id", "child_member_id", "parent_role"],
         )
         marriages_handle, marriages_writer = open_writer(
-            output_dir,
-            "marriages",
+            output_dir, "marriages",
             ["id", "genealogy_id", "spouse1_member_id", "spouse2_member_id", "married_year", "ended_year"],
         )
         collaborators_handle, collaborators_writer = open_writer(
-            output_dir,
-            "genealogy_collaborators",
+            output_dir, "genealogy_collaborators",
             ["id", "genealogy_id", "user_id", "role"],
         )
-        handles.extend(
-            [
-                users_handle,
-                genealogies_handle,
-                members_handle,
-                parent_child_handle,
-                marriages_handle,
-                collaborators_handle,
-            ]
-        )
+        handles.extend([
+            users_handle, genealogies_handle, members_handle,
+            parent_child_handle, marriages_handle, collaborators_handle,
+        ])
 
-        users_writer.writerow(
-            {
-                "id": 1,
-                "username": "demo",
-                "email": "demo@example.com",
+        if not skip_users:
+            users_writer.writerow({
+                "id": 1, "username": "demo", "email": "demo@example.com",
                 "password_hash": "pbkdf2:sha256:1000000$demo$replace-after-import",
-            }
-        )
+            })
 
-        for genealogy_index, target_size in enumerate(sizes, start=1):
-            genealogies_writer.writerow(
-                {
-                    "id": genealogy_index,
-                    "name": f"实验族谱 {genealogy_index}",
-                    "description": f"自动生成族谱，目标成员数 {target_size}。",
-                    "owner_id": 1,
-                }
-            )
-            write_members_for_genealogy(
-                fake=fake,
-                rng=rng,
-                genealogy_id=genealogy_index,
-                genealogy_index=genealogy_index,
-                target_size=target_size,
-                generations=generations,
-                counters=counters,
-                members_writer=members_writer,
-                parent_child_writer=parent_child_writer,
-                marriages_writer=marriages_writer,
-            )
+        for gi in range(num_genealogies):
+            gid = gi + 1 + id_offset
+            genealogies_writer.writerow({
+                "id": gid,
+                "name": f"{SURNAMES[gi]}氏族谱",
+                "description": f"{SURNAMES[gi]}氏家族族谱，目标成员数 {sizes[gi]}。",
+                "owner_id": 1,
+            })
+
+        per_gen_targets = [
+            generation_targets(size, generations, founder_count=8)
+            for size in sizes
+        ]
+
+        all_gen_members: list[list[list[dict]]] = []
+        for gi in range(num_genealogies):
+            gen_members_list: list[list[dict]] = []
+            for gen_idx in range(generations):
+                gen_members_list.append([])
+            all_gen_members.append(gen_members_list)
+
+        total_members_written = 0
+
+        for gi, gen_targets in enumerate(per_gen_targets):
+            gid = gi + 1 + id_offset
+            surname = SURNAMES[gi]
+            gen1_count = gen_targets[0]
+
+            for local_idx in range(gen1_count):
+                mid = counters.member_id
+                counters.member_id += 1
+                gender = "male" if local_idx % 2 == 0 else "female"
+                name = f"{surname}{given_name(fake, gender)}"
+                birth_year = birth_year_for(1, rng)
+                death_year = death_year_for(birth_year, 1, generations, rng)
+                biography = (
+                    f"{surname}氏第1代始祖"
+                    + (f"，生于{birth_year}" if birth_year else "")
+                    + (f"，卒于{death_year}" if death_year else "")
+                    + "。"
+                )
+                members_writer.writerow({
+                    "id": mid, "genealogy_id": gid, "name": name,
+                    "gender": gender, "birth_year": birth_year,
+                    "death_year": death_year, "biography": biography,
+                    "generation_no": 1,
+                })
+                all_gen_members[gi][0].append({"id": mid, "gender": gender, "name": name})
+                total_members_written += 1
+
+        for gen_idx in range(generations - 1):
+            gen_no = gen_idx + 1
+
+            all_males: list[dict] = []
+            all_females: list[dict] = []
+            for gi in range(num_genealogies):
+                for m in all_gen_members[gi][gen_idx]:
+                    entry = {**m, "gid": gi + 1 + id_offset}
+                    if m["gender"] == "male":
+                        all_males.append(entry)
+                    else:
+                        all_females.append(entry)
+
+            rng.shuffle(all_males)
+            rng.shuffle(all_females)
+
+            female_pool = list(all_females)
+            marriages_this_gen: list[dict] = []
+
+            for male in all_males:
+                found = None
+                for fi, female in enumerate(female_pool):
+                    if female["gid"] != male["gid"]:
+                        found = (fi, female)
+                        break
+                if found is None:
+                    continue
+                fi, female = found
+                female_pool.pop(fi)
+                marriages_this_gen.append({"male": male, "female": female})
+
+            for mar in marriages_this_gen:
+                male = mar["male"]
+                female = mar["female"]
+                married_year = birth_year_for(gen_no, rng) + rng.randint(22, 28)
+                marriages_writer.writerow({
+                    "id": counters.marriage_id,
+                    "genealogy_id": male["gid"],
+                    "spouse1_member_id": min(male["id"], female["id"]),
+                    "spouse2_member_id": max(male["id"], female["id"]),
+                    "married_year": married_year,
+                    "ended_year": "",
+                })
+                counters.marriage_id += 1
+
+            marriage_index: dict[int, list[dict]] = {}
+            for mar in marriages_this_gen:
+                mgid = mar["male"]["gid"]
+                marriage_index.setdefault(mgid, []).append(mar)
+
+            for gi in range(num_genealogies):
+                gid = gi + 1 + id_offset
+                surname = SURNAMES[gi]
+                couples = marriage_index.get(gid, [])
+                target = per_gen_targets[gi][gen_idx + 1]
+
+                if not couples:
+                    continue
+
+                per_couple = target // len(couples)
+                extra = target % len(couples)
+                gi_child_counter = 0
+
+                for ci, couple in enumerate(couples):
+                    male = couple["male"]
+                    female = couple["female"]
+                    n_children = per_couple + (1 if ci < extra else 0)
+
+                    for _ in range(n_children):
+                        mid = counters.member_id
+                        counters.member_id += 1
+                        child_gender = "male" if gi_child_counter % 2 == 0 else "female"
+                        gi_child_counter += 1
+                        child_name = f"{surname}{given_name(fake, child_gender)}"
+                        child_gen = gen_no + 1
+                        child_birth = birth_year_for(child_gen, rng)
+                        child_death = death_year_for(child_birth, child_gen, generations, rng)
+                        child_bio = (
+                            f"{surname}氏第{child_gen}代"
+                            + (f"，生于{child_birth}" if child_birth else "")
+                            + (f"，卒于{child_death}" if child_death else "")
+                            + "。"
+                        )
+
+                        members_writer.writerow({
+                            "id": mid, "genealogy_id": gid, "name": child_name,
+                            "gender": child_gender, "birth_year": child_birth,
+                            "death_year": child_death, "biography": child_bio,
+                            "generation_no": child_gen,
+                        })
+
+                        parent_child_writer.writerow({
+                            "id": counters.parent_child_id,
+                            "genealogy_id": gid,
+                            "parent_member_id": male["id"],
+                            "child_member_id": mid,
+                            "parent_role": "father",
+                        })
+                        counters.parent_child_id += 1
+
+                        parent_child_writer.writerow({
+                            "id": counters.parent_child_id,
+                            "genealogy_id": gid,
+                            "parent_member_id": female["id"],
+                            "child_member_id": mid,
+                            "parent_role": "mother",
+                        })
+                        counters.parent_child_id += 1
+
+                        all_gen_members[gi][gen_idx + 1].append({
+                            "id": mid, "gender": child_gender, "name": child_name,
+                        })
+                        total_members_written += 1
 
         return {
-            "genealogies": len(sizes),
-            "members": counters.member_id - 1,
-            "parent_child_relations": counters.parent_child_id - 1,
-            "marriages": counters.marriage_id - 1,
+            "genealogies": num_genealogies,
+            "members": total_members_written,
+            "parent_child_relations": counters.parent_child_id - 1 - id_offset,
+            "marriages": counters.marriage_id - 1 - id_offset,
             "max_genealogy_members": max(sizes),
             "max_generation_no": generations,
         }
@@ -280,10 +369,17 @@ def main() -> None:
     parser.add_argument("--sizes", help="Comma-separated genealogy member counts.")
     parser.add_argument("--generations", type=int, default=30, help="Generation count per genealogy.")
     parser.add_argument("--seed", type=int, default=20260501, help="Random seed.")
+    parser.add_argument("--id-offset", type=int, default=0,
+                        help="Offset added to all generated IDs (for appending to existing data).")
+    parser.add_argument("--skip-users", action="store_true",
+                        help="Skip generating users.csv (use when appending to existing DB).")
     args = parser.parse_args()
 
     sizes = parse_sizes(args.sizes)
-    summary = generate_dataset(Path(args.output_dir), sizes, args.generations, args.seed)
+    summary = generate_dataset(
+        Path(args.output_dir), sizes, args.generations, args.seed,
+        id_offset=args.id_offset, skip_users=args.skip_users,
+    )
 
     print("Generated CSV dataset:")
     for key, value in summary.items():

@@ -10,11 +10,12 @@
 - 成员管理：添加/编辑/删除成员、按姓名模糊搜索（GIN trigram 索引加速）、分页。
 - 关系管理：添加父母、配偶、子女关系。
 - Dashboard 统计：总人数、男女比例。
-- 树形预览：递归 CTE 展开全族谱树（12 层、500 行限制）。
+- 树形预览：懒加载 + 父系树 + 配偶可点击跳转，大数据集秒级加载
 - 递归查询：祖先追溯、后代追溯、亲缘最短路径（BFS + CYCLE 子句）。
 - SQL 统计页：5 类 PPT 要求查询集中展示。
 - CSV 导出：流式分块导出、支持 50K+ 成员。
-- 数据库级约束：8 条 CHECK + 3 个跨行触发器。
+- 数据库级约束：8 条 CHECK + 3 个跨行触发器，支持跨族谱通婚。
+- **真实数据生成**：符合中国父系传统——每个族谱固定姓氏、跨族谱通婚、零近亲结婚。
 
 ## 环境需求
 
@@ -74,16 +75,27 @@ http://127.0.0.1:5000
 
 ## 数据生成与导入
 
-生成满足实验规模要求的 CSV：
+生成满足实验规模要求的 CSV（**新逻辑：中国族谱传统，父系同姓、跨族通婚**）：
 
 ```powershell
+# 生成 10 个族谱，共 ~11 万人，30 代
 .venv\Scripts\python.exe scripts\seed_data.py --output-dir data\generated
+
+# 自定义族谱规模
+.venv\Scripts\python.exe scripts\seed_data.py --sizes "10000,5000,3000" --generations 20
+
+# 增量追加到已有数据（使用 ID 偏移避免冲突）
+.venv\Scripts\python.exe scripts\seed_data.py --sizes "5000" --output-dir data/my_data --id-offset 600000 --skip-users
 ```
 
 导入 PostgreSQL：
 
 ```powershell
+# 全新导入（清空旧数据）
 .venv\Scripts\python.exe scripts\import_csv.py --input-dir data\generated --truncate
+
+# 增量追加（保留旧数据）
+.venv\Scripts\python.exe scripts\import_csv.py --input-dir data\my_data --skip-users
 ```
 
 导出某个成员分支：
@@ -108,6 +120,8 @@ http://127.0.0.1:5000
 demo@example.com
 demo123456
 ```
+
+演示族谱数据说明：该演示族谱预置了约50名成员，覆盖五代，包含父母、配偶、子女关系，可用于快速验证祖先追溯、后代查询、亲缘路径等功能。
 
 数据库验收：
 

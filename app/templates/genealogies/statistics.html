@@ -13,18 +13,28 @@
   <div class="card-header fw-semibold">4.1 配偶及子女查询（成员 ID = 1）</div>
   <div class="card-body p-0">
     <table class="table table-striped mb-0">
-      <thead><tr><th>关系</th><th>姓名</th><th>性别</th><th>婚姻年份</th></tr></thead>
+      <thead>
+        <tr>
+          <th>关系</th>
+          <th>姓名</th>
+          <th>性别</th>
+          <th>婚姻年份</th>
+        </tr>
+      </thead>
       <tbody>
         {% for r in spouse_children %}
         <tr>
-          <td><span class="badge {% if r.kind == 'spouse' %}bg-info{% else %}bg-success{% endif %}">{{ '配偶' if r.kind == 'spouse' else '子女' }}</span></td>
+          <td><span class="badge {% if r.kind == 'spouse' %}bg-info{% else %}bg-success{% endif %}">{{ '配偶' if r.kind ==
+              'spouse' else '子女' }}</span></td>
           <td>{{ r.name }}</td>
           <td>{{ r.gender }}</td>
           <td>{{ r.married_year or '' }}</td>
         </tr>
         {% endfor %}
         {% if not spouse_children %}
-        <tr><td colspan="4" class="text-muted text-center">无结果</td></tr>
+        <tr>
+          <td colspan="4" class="text-muted text-center">无结果</td>
+        </tr>
         {% endif %}
       </tbody>
     </table>
@@ -35,7 +45,14 @@
   <div class="card-header fw-semibold">4.3 平均寿命最长的一代（辈分）</div>
   <div class="card-body p-0">
     <table class="table table-striped mb-0">
-      <thead><tr><th>族谱 ID</th><th>代数</th><th>平均寿命</th><th>有效成员数</th></tr></thead>
+      <thead>
+        <tr>
+          <th>族谱 ID</th>
+          <th>代数</th>
+          <th>平均寿命</th>
+          <th>有效成员数</th>
+        </tr>
+      </thead>
       <tbody>
         {% if lifespan_gen %}
         <tr>
@@ -45,7 +62,9 @@
           <td>{{ lifespan_gen.member_count }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="4" class="text-muted text-center">无结果</td></tr>
+        <tr>
+          <td colspan="4" class="text-muted text-center">无结果</td>
+        </tr>
         {% endif %}
       </tbody>
     </table>
@@ -56,7 +75,16 @@
   <div class="card-header fw-semibold">4.4 超过 50 岁且无配偶的男性成员</div>
   <div class="card-body p-0">
     <table class="table table-striped mb-0">
-      <thead><tr><th>ID</th><th>姓名</th><th>生年</th><th>卒年</th><th>代数</th><th>估算年龄</th></tr></thead>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>姓名</th>
+          <th>生年</th>
+          <th>卒年</th>
+          <th>代数</th>
+          <th>估算年龄</th>
+        </tr>
+      </thead>
       <tbody>
         {% for m in males_no_spouse %}
         <tr>
@@ -69,7 +97,9 @@
         </tr>
         {% endfor %}
         {% if not males_no_spouse %}
-        <tr><td colspan="6" class="text-muted text-center">mock 数据中所有成员均有配偶，查询逻辑已验证正确</td></tr>
+        <tr>
+          <td colspan="6" class="text-muted text-center">mock 数据中所有成员均有配偶，查询逻辑已验证正确</td>
+        </tr>
         {% endif %}
       </tbody>
     </table>
@@ -80,7 +110,17 @@
   <div class="card-header fw-semibold">4.5 出生年份早于该辈分平均出生年份的成员</div>
   <div class="card-body p-0">
     <table class="table table-striped mb-0">
-      <thead><tr><th>ID</th><th>姓名</th><th>性别</th><th>出生年</th><th>代数</th><th>代平均出生年</th><th>偏差</th></tr></thead>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>姓名</th>
+          <th>性别</th>
+          <th>出生年</th>
+          <th>代数</th>
+          <th>代平均出生年</th>
+          <th>偏差</th>
+        </tr>
+      </thead>
       <tbody>
         {% for m in born_before_avg %}
         <tr>
@@ -94,7 +134,9 @@
         </tr>
         {% endfor %}
         {% if not born_before_avg %}
-        <tr><td colspan="7" class="text-muted text-center">mock 数据中同代成员出生年份完全相同（无方差），查询逻辑已验证正确</td></tr>
+        <tr>
+          <td colspan="7" class="text-muted text-center">mock 数据中同代成员出生年份完全相同（无方差），查询逻辑已验证正确</td>
+        </tr>
         {% endif %}
       </tbody>
     </table>

@@ -111,3 +111,102 @@ body {
 .relation-row:last-child {
   border-bottom: 0;
 }
+
+/* ================================
+   交互式树形预览 (lazy-load tree)
+   ================================ */
+.tree-toolbar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tree-container {
+  background: #fff;
+  border: 1px solid #e7e3dc;
+  border-radius: 8px;
+  padding: 4px 0;
+  min-height: 120px;
+}
+
+.tree-loading,
+.tree-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #999;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px solid #f0efe9;
+  transition: background 0.15s;
+}
+
+.tree-row:hover {
+  background: #faf9f7;
+}
+
+.tree-row:last-child {
+  border-bottom: 0;
+}
+
+.tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b4f2a;
+  background: #f0ede6;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  margin-right: 8px;
+  transition: background 0.15s;
+}
+
+.tree-toggle:hover {
+  background: #e0d9cc;
+}
+
+.tree-toggle.leaf {
+  background: transparent;
+  cursor: default;
+  color: #ccc;
+}
+
+.tree-node-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tree-node-body a {
+  font-weight: 500;
+  color: #252525;
+  text-decoration: none;
+}
+
+.tree-node-body a:hover {
+  color: #6b4f2a;
+  text-decoration: underline;
+}
+
+.tree-spouse-wrap {
+  font-size: 0.85rem;
+}
+
+.tree-spouse {
+  color: #8a7e6b;
+}
+
+.tree-children {
+  /* no extra styling — indent is on .tree-row */
+}

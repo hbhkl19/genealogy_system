@@ -158,6 +158,12 @@ class ParentChildRelation(db.Model):
         CheckConstraint("parent_role in ('father', 'mother')", name="ck_parent_role"),
         Index("ix_parent_child_genealogy_parent", "genealogy_id", "parent_member_id"),
         Index("ix_parent_child_genealogy_child", "genealogy_id", "child_member_id"),
+        Index(
+            "ix_parent_child_father_only",
+            "genealogy_id",
+            "child_member_id",
+            postgresql_where=db.text("parent_role = 'father'"),
+        ),
     )
 
 

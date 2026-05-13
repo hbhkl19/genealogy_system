@@ -86,9 +86,13 @@ BEGIN
         RAISE EXCEPTION 'parent or child member does not exist';
     END IF;
 
-    IF parent_record.genealogy_id <> NEW.genealogy_id
-       OR child_record.genealogy_id <> NEW.genealogy_id THEN
-        RAISE EXCEPTION 'parent and child must belong to the same genealogy';
+    IF child_record.genealogy_id <> NEW.genealogy_id THEN
+        RAISE EXCEPTION 'child must belong to the same genealogy as the relation record';
+    END IF;
+
+    IF NEW.parent_role = 'father'
+       AND parent_record.genealogy_id <> NEW.genealogy_id THEN
+        RAISE EXCEPTION 'father must belong to the same genealogy as the child';
     END IF;
 
     IF parent_record.generation_no >= child_record.generation_no THEN
@@ -118,11 +122,6 @@ BEGIN
         RAISE EXCEPTION 'spouse member does not exist';
     END IF;
 
-    IF spouse1_record.genealogy_id <> NEW.genealogy_id
-       OR spouse2_record.genealogy_id <> NEW.genealogy_id THEN
-        RAISE EXCEPTION 'spouses must belong to the same genealogy';
-    END IF;
-
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -138,8 +137,8 @@ BEGIN
     JOIN members child_member ON child_member.id = rel.child_member_id
     WHERE (rel.parent_member_id = NEW.id OR rel.child_member_id = NEW.id)
       AND (
-          parent_member.genealogy_id <> rel.genealogy_id
-          OR child_member.genealogy_id <> rel.genealogy_id
+          child_member.genealogy_id <> rel.genealogy_id
+          OR (rel.parent_role = 'father' AND parent_member.genealogy_id <> rel.genealogy_id)
           OR parent_member.generation_no >= child_member.generation_no
           OR (
               parent_member.birth_year IS NOT NULL
@@ -150,20 +149,6 @@ BEGIN
 
     IF invalid_count > 0 THEN
         RAISE EXCEPTION 'member update would violate existing parent-child relations';
-    END IF;
-
-    SELECT COUNT(*) INTO invalid_count
-    FROM marriages marriage
-    JOIN members spouse1_member ON spouse1_member.id = marriage.spouse1_member_id
-    JOIN members spouse2_member ON spouse2_member.id = marriage.spouse2_member_id
-    WHERE (marriage.spouse1_member_id = NEW.id OR marriage.spouse2_member_id = NEW.id)
-      AND (
-          spouse1_member.genealogy_id <> marriage.genealogy_id
-          OR spouse2_member.genealogy_id <> marriage.genealogy_id
-      );
-
-    IF invalid_count > 0 THEN
-        RAISE EXCEPTION 'member update would violate existing marriage relations';
     END IF;
 
     RETURN NEW;

@@ -1,6 +1,6 @@
 from urllib.parse import quote
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, text
 
@@ -114,44 +114,102 @@ def members(id):
 @login_required
 def tree(id):
     genealogy = get_accessible_genealogy(id)
-    sql = """
-        WITH RECURSIVE tree AS (
-            SELECT
-                m.id,
-                m.name,
-                m.gender,
-                m.generation_no,
-                0 AS depth,
-                ',' || CAST(m.id AS TEXT) || ',' AS path
+    return render_template("genealogies/tree.html", genealogy=genealogy)
+
+
+@bp.route("/<int:id>/tree/roots")
+@login_required
+def tree_roots(id):
+    genealogy = get_accessible_genealogy(id)
+    rows = db.session.execute(
+        text("""
+            SELECT m.id, m.name, m.gender, m.generation_no,
+                   COALESCE(m.birth_year, 0) AS birth_year,
+                   EXISTS(SELECT 1 FROM parent_child_relations p2
+                          WHERE p2.parent_member_id = m.id
+                            AND p2.genealogy_id = :gid) AS has_children,
+                   COALESCE(
+                       (SELECT json_agg(json_build_object('id', sp.id, 'name', sp.name))
+                        FROM marriages mar
+                        JOIN members sp ON sp.id =
+                            CASE WHEN mar.spouse1_member_id = m.id THEN mar.spouse2_member_id
+                                 ELSE mar.spouse1_member_id END
+                        WHERE (mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id)
+                       ), '[]'::json
+                   ) AS spouses
             FROM members m
-            WHERE m.genealogy_id = :genealogy_id
+            WHERE m.genealogy_id = :gid
               AND NOT EXISTS (
-                  SELECT 1
-                  FROM parent_child_relations p
+                  SELECT 1 FROM parent_child_relations p
                   WHERE p.child_member_id = m.id
-                    AND p.genealogy_id = :genealogy_id
+                    AND p.genealogy_id = :gid
+                    AND p.parent_role = 'father'
               )
-            UNION ALL
-            SELECT
-                child.id,
-                child.name,
-                child.gender,
-                child.generation_no,
-                tree.depth + 1,
-                tree.path || CAST(child.id AS TEXT) || ','
-            FROM tree
-            JOIN parent_child_relations rel ON rel.parent_member_id = tree.id
-            JOIN members child ON child.id = rel.child_member_id
-            WHERE rel.genealogy_id = :genealogy_id
-              AND tree.depth < 12
-        )
-        SELECT id, name, gender, generation_no, depth
-        FROM tree
-        ORDER BY path
-        LIMIT 500
-    """
-    rows = db.session.execute(text(sql), {"genealogy_id": id}).mappings().all()
-    return render_template("genealogies/tree.html", genealogy=genealogy, rows=rows)
+              AND (
+                  m.gender = 'male'
+                  OR NOT EXISTS (
+                      SELECT 1 FROM marriages mar
+                      WHERE mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id
+                  )
+              )
+            ORDER BY m.generation_no, m.id
+        """),
+        {"gid": id},
+    ).mappings().all()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.route("/<int:id>/tree/children/<int:member_id>")
+@login_required
+def tree_children(id, member_id):
+    genealogy = get_accessible_genealogy(id)
+    member = db.session.get(Member, member_id)
+    if not member or member.genealogy_id != id:
+        abort(404)
+
+    spouses = db.session.execute(
+        text("""
+            SELECT m.id, m.name, m.gender
+            FROM marriages mar
+            JOIN members m ON m.id =
+                CASE WHEN mar.spouse1_member_id = :mid THEN mar.spouse2_member_id
+                     ELSE mar.spouse1_member_id END
+            WHERE (mar.spouse1_member_id = :mid OR mar.spouse2_member_id = :mid)
+        """),
+        {"gid": id, "mid": member_id},
+    ).mappings().all()
+
+    children = db.session.execute(
+        text("""
+            SELECT m.id, m.name, m.gender, m.generation_no,
+                   COALESCE(m.birth_year, 0) AS birth_year,
+                   EXISTS(SELECT 1 FROM parent_child_relations p2
+                          WHERE p2.parent_member_id = m.id
+                            AND p2.genealogy_id = :gid
+                            AND p2.parent_role = 'father') AS has_children,
+                   COALESCE(
+                       (SELECT json_agg(json_build_object('id', sp.id, 'name', sp.name))
+                        FROM marriages mar
+                        JOIN members sp ON sp.id =
+                            CASE WHEN mar.spouse1_member_id = m.id THEN mar.spouse2_member_id
+                                 ELSE mar.spouse1_member_id END
+                        WHERE (mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id)
+                       ), '[]'::json
+                   ) AS spouses
+            FROM parent_child_relations p
+            JOIN members m ON m.id = p.child_member_id
+            WHERE p.parent_member_id = :mid
+              AND p.genealogy_id = :gid
+            ORDER BY m.gender = 'male' DESC, m.birth_year, m.id
+        """),
+        {"gid": id, "mid": member_id},
+    ).mappings().all()
+
+    return jsonify({
+        "member": {"id": member.id, "name": member.name, "gender": member.gender},
+        "spouses": [dict(s) for s in spouses],
+        "children": [dict(c) for c in children],
+    })
 
 
 @bp.route("/<int:id>/statistics")

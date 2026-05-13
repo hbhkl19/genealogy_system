@@ -1,8 +1,8 @@
 # 更新日志
 
 > 项目：寻根溯源族谱管理系统  
-> 日期范围：2026-05-11 — 2026-05-12  
-> 累计变更：44 文件, +3300/-97 行, 新建 27 文件
+> 日期范围：2026-05-11 — 2026-05-13  
+> 累计变更：47+ 文件, ~4000 行
 
 ---
 
@@ -242,9 +242,104 @@ db_smoke_test:            PASS  (10族谱/104K人/50Kmax/30代/0孤立)
 pytest (10 tests):        PASS
 SQL 查询 4.1-4.5:         全部返回有效结果
 Web 路由 (22条):          全部可用
-索引:                     5 个 (GIN trigram + 4×B-tree 复合)
-触发器:                   3 个 (父子/婚姻/成员更新)
+索引:                     6 个 (GIN trigram + 5×B-tree 复合)
+触发器:                   3 个 (父子/婚姻/成员更新，已适配跨族谱)
 存储函数:                 4 个 (3 约束验证 + 1 BFS)
 EXPLAIN 加速:             258× (91.65ms → 0.36ms)
 亲缘链路查询 (50K 人):    0.3~1.6 秒, ~40~1200× 加速
 ```
+
+---
+
+## 🌳 树形预览性能优化（2026-05-13）
+
+### 问题诊断
+
+**初次加载慢**: 每次进入树形预览页面，`tree()` 路由执行完整递归 CTE 遍历（12 层、500 行），即使前端已改用 AJAX 懒加载、`rows` 变量在模板中完全未使用。白白浪费 200+ms。
+
+**展开节点卡顿**: 展开节点时，`bindToggles()` 使用 `document.querySelectorAll('.tree-toggle')` 扫描**整个 DOM**，树越大越慢。且 `expandNodesRecursive` 中每层有 100ms 人为延迟。
+
+### 修复
+
+| 位置 | 问题 | 修复 | 文件 |
+|------|------|------|------|
+| `tree()` 路由 | 冗余递归 CTE 查询 | 删除查询，直接渲染模板 | `genealogies/routes.py` |
+| `bindToggles()` | 全文档扫描 | 改为 `bindToggles(container)` 只扫描新增容器 | `templates/genealogies/tree.html` |
+| `expandNodesRecursive` | 每层 `delay(100)` | 移除人为延迟 | 同上 |
+| `tree/roots` | `NOT EXISTS` + `string_agg` = 77ms | LEFT JOIN 反连接 + `json_agg` = 38ms | `genealogies/routes.py` |
+
+### 效果
+
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| 初次加载 SQL | 200+ms (全树递归CTE) | **0ms** (0 条查询) |
+| 根节点查询 | 77ms | **38ms** |
+| 展开子节点 | 2~6ms | 2~6ms (无瓶颈) |
+| 单节点展开前端 | O(total_nodes) DOM 扫描 | O(new_nodes) 局部扫描 |
+| 展开全部按钮 | ~400ms 人为延迟 | 无延迟 |
+
+---
+
+## 🏠 中国族谱数据生成重写（2026-05-13）
+
+### 旧逻辑的问题
+
+1. **近亲结婚**: 族谱内同代男女互配 → 堂表亲通婚严重
+2. **不同姓**: 姓名随机（Faker），张氏族谱里也出现李姓
+3. **无跨族通婚**: 所有婚姻在同一族谱内完成
+
+### 新设计（符合真实中国族谱传统）
+
+| 方面 | 旧逻辑 | 新逻辑 |
+|------|--------|--------|
+| 姓氏 | 随机 | 每个族谱固定一个姓氏（张/李/王/赵…共 20 姓） |
+| 婚姻 | 族谱内配对 | **跨族谱配对**（不同姓氏通婚） |
+| 子女归属 | 随意 | 归入**父亲族谱**，继承父亲姓氏 |
+| 世代增长 | 均匀分布 | **指数增长**（从 8 位始祖繁衍） |
+| 族谱名 | "实验族谱 N" | "张氏族谱"、"李氏族谱"…… |
+
+### 验证结果（3 族谱 × 5 代 × 200 人测试）
+
+```
+跨族谱婚姻: 66 对   ← 100%
+近亲结婚:   0 对    ← 完全杜绝
+张氏族谱:   100% 张姓
+李氏族谱:   100% 李姓
+王氏族谱:   100% 王姓
+```
+
+### 新增数据库迁移
+
+`migrations/versions/c4d2f8305a00` — 修改 3 个触发器以支持跨族谱关系：
+
+| 触发器 | 修改 |
+|--------|------|
+| `validate_parent_child_relation` | 父亲+子女同族谱；**母亲可跨族谱** |
+| `validate_marriage_relation` | 移除配偶必须同族谱限制 |
+| `validate_member_existing_relations` | 相应宽松化 |
+
+### 增量导入支持
+
+| 参数 | 用途 |
+|------|------|
+| `--id-offset N` | 所有 ID 偏移 N，避免与已有数据冲突 |
+| `--skip-users` | 不生成 users.csv（已有用户） |
+| `import_csv.py --skip-users --append` | 增量导入，跳过缺失文件 |
+
+**典型使用**（在已有数据旁追加新族谱）:
+```powershell
+# 1. 查最大 ID
+.venv\Scripts\python.exe -c "from app.models import Genealogy;from app import create_app;from app.extensions import db;app=create_app();app.app_context().push();print(db.session.query(db.func.max(Genealogy.id)).scalar())"
+
+# 2. 生成新数据（用更大的偏移量）
+.venv\Scripts\python.exe scripts\seed_data.py --sizes "5000,3000" --generations 20 --output-dir data/my_data --id-offset 600000 --skip-users
+
+# 3. 导入
+.venv\Scripts\python.exe scripts\import_csv.py --input-dir data/my_data --skip-users
+```
+
+### 树形预览前端优化
+
+- **配偶手风琴展示**: 配偶名字带可点击链接跳转到成员详情页
+- **父系树**: 显示配偶在父系成员名下，子女仅在父亲节点下展开
+- **后端**: `json_agg(json_build_object(...))` 返回结构化配偶数据 `[{id, name}]`
