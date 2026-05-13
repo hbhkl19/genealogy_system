@@ -1,235 +1,132 @@
 # TODO
 
-本文件用于记录“寻根溯源”族谱管理系统的关键开发步骤和每次开发进展。后续每次开发前先看本文件，开发后更新对应状态、日期和备注。
+本文件用于记录“寻根溯源”族谱管理系统的关键开发步骤、验收状态和每次开发进展。每次继续开发前先看本文件，开发后更新状态。
 
 ## 状态标记
 
 - `[ ]` 未开始
 - `[~]` 进行中
 - `[x]` 已完成
-- `[!]` 有阻塞或需要确认
+- `[!]` 需要注意或人工补充
 
 ## 当前里程碑
 
 ### M0 项目基础与环境
 
-- `[x]` 初始化 Git 仓库。
-- `[x]` 建立项目目录：`app/`、`scripts/`、`sql/`、`tests/`、`docs/`、`data/`。
-- `[x]` 建立 Flask 应用工厂、配置层、扩展初始化和蓝图结构。
-- `[x]` 补充 VSCode 配置：推荐扩展、调试配置、任务配置、Python 解释器配置。
-- `[x]` 编写 `README.md`，说明主要功能、环境需求、启动方式和项目结构。
-- `[~]` 检查本地开发环境。
-  - 已确认 `.venv` 可用，Flask、SQLAlchemy、psycopg、pytest 等依赖已安装。
-  - 已确认 `flask --app app routes` 可列出路由。
-  - 已确认 `pytest` 能通过最小测试。
-  - 待处理：当前 `.venv` 是 Python 3.13.3，计划推荐 Python 3.11.x，需要决定是否重建虚拟环境。
-  - 已处理：为 VSCode 终端补充 `terminal.integrated.inheritEnv` 和 PostgreSQL 16 常见 `bin` 路径。
-  - 已处理：为 pytest 配置禁用 cacheprovider，限制测试收集目录，并将 `pytest-cache-files-*` 加入 `.gitignore`。
-  - 待确认：重新打开 VSCode 后，在集成终端执行 `psql --version` 是否可用。
+- `[x]` 初始化 Git 仓库和项目目录。
+- `[x]` 建立 Flask 应用工厂、配置分层、数据库扩展和蓝图结构。
+- `[x]` 配置 VSCode 推荐扩展、调试、任务和 pytest。
+- `[x]` 编写 README、项目结构说明和启动步骤。
+- `[x]` 接入 Flask-Migrate，当前 PostgreSQL 迁移版本为 `a7c9d2f4b601`。
 
 ### M1 用户与权限
 
-- `[x]` 实现用户注册、登录、退出。
-- `[x]` 实现密码哈希。
-- `[x]` 实现登录拦截。
-- `[x]` 实现用户只能查看自己创建或受邀参与的族谱。
-- `[ ]` 增加更完整的表单校验和错误提示。
-- `[ ]` 增加认证相关测试：注册、登录、重复账号、未登录访问重定向。
+- `[x]` 用户注册、登录、退出、密码哈希和登录拦截。
+- `[x]` 用户只能看到自己创建或受邀参与的族谱。
+- `[x]` 协作者表保存 `viewer/editor` 角色。
+- `[!]` 可加分：进一步严格区分 `viewer` 只读、`editor` 可编辑。
 
 ### M2 族谱管理与协作
 
-- `[x]` 实现族谱创建和列表页。
-- `[x]` 实现族谱详情页和 Dashboard 基础统计。
-- `[x]` 实现协作者邀请入口。
-- `[ ]` 实现族谱编辑和删除。
-- `[ ]` 完善协作者角色权限：`viewer` 只读，`editor` 可编辑。
-- `[ ]` 增加族谱管理相关测试。
+- `[x]` 族谱创建、列表、详情和 Dashboard。
+- `[x]` 族谱基本信息包含谱名、姓氏、修谱年份、简介、创建用户。
+- `[x]` 族谱编辑和删除。
+- `[x]` 族谱创建者可邀请协作者。
+- `[x]` Dashboard 显示总人数和男女数量。
 
 ### M3 成员管理与关系维护
 
-- `[x]` 实现成员新增。
-- `[x]` 实现成员列表和姓名模糊搜索入口。
-- `[x]` 实现成员编辑和删除。
-- `[x]` 实现父亲、母亲、子女关系维护页面。
-- `[x]` 实现婚姻关系维护页面。
-- `[x]` 实现关系合法性校验。
-  - 成员不能成为自己的父母或配偶。
-  - 同一子女最多一个父亲、一个母亲。
-  - 父母出生年应早于子女；当前已做应用层校验，数据库触发器留在 M5 完成。
-  - 婚姻关系使用有序成员对避免重复。
-- `[x]` 增加成员和关系维护测试。
+- `[x]` 成员新增、编辑、删除。
+- `[x]` 成员列表和姓名模糊搜索入口。
+- `[x]` 父亲、母亲、子女关系维护。
+- `[x]` 婚姻关系维护。
+- `[x]` 关系合法性校验：不能自关联、同一子女最多一父一母、父母出生年早于子女、父母代数小于子女、婚姻有序去重。
 
 ### M4 递归查询与树形展示
 
-- `[x]` 建立祖先查询路由和递归 CTE 雏形。
-- `[x]` 建立亲缘链路查询路由和递归 CTE 雏形。
-- `[x]` 建立树形预览页面入口。
-- `[x]` 实现直系后代查询页面。
-- `[x]` 将树形预览从根节点列表扩展为缩进树或折叠列表。
-- `[x]` 优化亲缘链路页面，展示每一段关系类型。
-- `[x]` 将最终 SQL 固化到 `sql/queries/`，每类需求只保留一个答辩版本。
+- `[x]` 树形预览使用递归 CTE，以缩进层级列表展示，限制深度和行数保证大数据演示稳定。
+- `[x]` 祖先查询：输入成员 ID，追溯父辈以上祖先。
+- `[x]` 后代查询：输入成员 ID，查询直系后代。
+- `[x]` 亲缘链路查询：父母子女关系和婚姻关系双向化后查询可达路径。
+- `[x]` 亲缘链路已优化为渐进式双向 BFS，并在 PostgreSQL 中部署 `bfs_reachable()` 函数。
+- `[x]` 图形化族谱树已改为懒加载版本：首次不加载全量节点，可加载根成员、按成员 ID 定位，并逐层展开父母或子女。
+- `[!]` 可加分：后续可继续增加缩放、拖拽和按成员姓名定位；当前版本优先保证 6000/50000 人大族谱页面不卡死。
 
 ### M5 数据库结构、DDL 与约束
 
-- `[x]` 建立核心 SQLAlchemy 模型：`users`、`genealogies`、`genealogy_collaborators`、`members`、`parent_child_relations`、`marriages`。
-- `[x]` 编写初版 `sql/schema.sql`。
-- `[x]` 编写基础索引：姓名 trigram、父子查询索引、婚姻双方索引。
-- `[x]` 接入 Flask-Migrate，生成首个迁移版本。
-- `[x]` 编写跨行约束触发器。
-- `[x]` 整理 E-R 图、关系模式和 3NF 说明。
+- `[x]` 核心表：`users`、`genealogies`、`genealogy_collaborators`、`members`、`parent_child_relations`、`marriages`。
+- `[x]` DDL 位于 `sql/schema.sql`。
+- `[x]` 索引覆盖姓名模糊查询、父节点查子节点、子节点查父节点、婚姻双方查询。
+- `[x]` 数据库触发器覆盖跨行约束。
+- `[x]` `docs/data_model.md` 包含 E-R 图、关系模式和 3NF 说明。
 
 ### M6 数据生成、导入与导出
 
-- `[x]` 实现 Faker 数据生成脚本。
-- `[x]` 生成至少 10 个族谱。
-- `[x]` 生成总成员数不少于 100000。
-- `[x]` 生成至少一个不少于 50000 成员的族谱。
-- `[x]` 生成至少 30 代传承。
-- `[x]` 保证每个成员至少存在一条婚姻或血缘边。
-- `[x]` 导出 CSV。
-- `[x]` 编写 PostgreSQL `COPY` 导入流程。
-- `[x]` 实现某分支导出脚本。
-- `[x]` 提供分支导出 CSV 和再导入测试库的说明。
+- `[x]` `scripts/seed_data.py` 生成至少 10 个族谱、总成员不少于 100000、最大单族谱不少于 50000、至少 30 代。
+- `[x]` 生成数据保证每个成员至少有一条血缘或婚姻边。
+- `[x]` `scripts/import_csv.py` 使用 PostgreSQL `COPY` 导入 CSV。
+- `[x]` `scripts/export_branch.py` 导出某成员及其递归后代分支。
+- `[x]` `sql/copy_import.sql` 提供手工 `\copy` 示例。
 
 ### M7 SQL 实验与性能优化
 
-- `[x]` 建立 `sql/queries/00_validation.sql`。
-- `[x]` 建立祖先、后代、亲缘路径和四代查询 EXPLAIN SQL 初版。
-- `[x]` 建立树形预览 SQL。
-- `[x]` 补齐课程要求的 5 类最终 SQL。
-- `[x]` 对四代查询执行无索引和有索引的 `EXPLAIN (ANALYZE, BUFFERS)`。
-- `[x]` 保存执行计划文本报告，截图可基于报告或终端输出截取。
-- `[x]` 整理耗时对比表。
-- `[x]` 编写性能优化说明。
+- `[x]` `sql/queries/` 覆盖祖先、后代、亲缘链路、树形预览、四代查询 EXPLAIN 和 5 类课程 SQL。
+- `[x]` `scripts/explain_performance.py` 可生成有/无索引的四代查询性能对比。
+- `[x]` `docs/performance_results.md` 保存执行计划和耗时说明。
+- `[x]` `scripts/test_optimized_path.py` 可验证 5 万人族谱上的亲缘链路查询性能。
 
 ### M8 演示、报告与验收
 
-- `[x]` 准备演示账号和示例族谱。
-- `[x]` 整理截图清单：注册、登录、族谱管理、成员管理、树形预览、祖先查询、亲缘路径查询。
-- `[x]` 整理数据库备份和恢复说明。
-- `[x]` 整理实验报告提纲。
-- `[x]` 按验收 SQL 验证数据规模。
-- `[x]` 最终运行 `flask --app app routes`、`pytest` 和数据库 smoke test。
+- `[x]` `scripts/create_demo_data.py` 创建稳定演示账号：`demo@example.com` / `demo123456`。
+- `[x]` 演示族谱为 20 人、5 代，含生卒年、婚姻、血缘、无配偶老年男性和代内出生年份差异。
+- `[x]` `docs/demo_guide.md`、`docs/acceptance_guide.md`、`docs/report_outline.md`、`docs/backup_restore.md` 已存在。
+- `[!]` 人工补充：最终报告仍需按老师要求插入数据库执行截图、页面截图和备份文件。
 
-## 开发日志
+## 2026-05-13 队友修改后审查记录
 
-### 2026-04-29
+### 已发现并修复的问题
 
-- 完成从零开始的项目骨架。
-- 完成 `README.md`、VSCode 配置、基础 Flask 页面、核心模型、初版 SQL 和最小测试。
-- 验证结果：
-  - `flask --app app routes` 成功。
-  - `pytest` 通过，结果为 `1 passed`，但出现 pytest 缓存目录权限警告。
-  - Flask 开发服务器可以访问 `http://127.0.0.1:5000`。
-- 新增本文件，将后续开发拆分为 M0-M8 里程碑。
+- `[x]` `pytest` 失败：亲缘链路优化使用 PostgreSQL `CYCLE`，SQLite 测试库不支持。已增加 SQLite 专用 Python BFS 兜底，不影响 PostgreSQL 正式路径。
+- `[x]` 数据生成测试对随机婚姻数写死为 15，和生成逻辑不稳定。已改为校验摘要中的真实婚姻数，并继续校验所有成员至少一条边。
+- `[x]` 族谱缺少“姓氏、修谱年份”字段，且没有族谱编辑/删除。已补模型、迁移、表单、列表、详情页和测试。
+- `[x]` CSV 生成与 COPY 导入未包含族谱新增字段。已同步更新 `seed_data.py`、`import_csv.py`、`sql/copy_import.sql`。
+- `[x]` 演示脚本复用旧“演示族谱”时会得到不完整数据。已改为每次重建稳定演示族谱。
+- `[x]` 演示族谱中的无配偶老年男性原本没有任何边。已改为接入血缘树，保留“无配偶男性”查询演示点，同时全库 `members_without_edge = 0`。
+- `[x]` `bfs_reachable()` 函数只在 SQL 文件中，没有进入迁移。已新增迁移 `a7c9d2f4b601_add_bfs_reachable_function.py` 并部署到本地 PostgreSQL。
+- `[x]` 亲缘链路批量关系标签查询原来按成员 ID 排序，可能打乱路径步序。已改为按路径步骤序号排序。
 
-### 2026-04-29 第二轮
+### 本轮自动验收结果
 
-- 接入 Flask-Migrate，生成 `migrations/` 和首个 `initial schema` 迁移。
-- 调整模型和迁移中的时间字段为带时区时间，并补充数据库端默认值。
-- 在迁移中补充 `pg_trgm` 扩展、姓名 GIN trigram 索引、父子关系复合索引和婚姻关系复合索引。
-- 更新 VSCode 终端环境配置，尝试解决集成终端找不到 `psql` 的问题。
-- 更新 pytest 配置和 `.gitignore`，减少缓存权限问题对开发的干扰。
+- `[x]` `flask --app app db current`：`a7c9d2f4b601 (head)`。
+- `[x]` `pytest`：`11 passed`。
+- `[x]` `compileall app scripts migrations`：通过。
+- `[x]` `scripts/db_smoke_test.py`：11 个族谱、104020 个成员、最大单族谱 50000、最大 30 代、孤立成员 0、`large_dataset_acceptance: PASS`。
+- `[x]` 页面级巡检：登录、族谱列表、详情、编辑、邀请、成员列表、姓名搜索、树形预览、统计页、关系页、祖先、后代、亲缘链路、CSV 导出均返回 200。
+- `[x]` `scripts/test_optimized_path.py`：5 万人族谱亲缘链路测试全部在 5 秒内完成，本轮最慢约 2 秒。
 
-### 2026-04-29 第三轮
+## 2026-05-13 懒加载式图形化族谱树实现记录
 
-- 完成 M3 成员管理与关系维护。
-- 新增成员编辑、删除路由和页面入口。
-- 新增成员关系维护页面，可添加和移除父母、子女、婚姻关系。
-- 增加基础合法性校验：不能自关联、同一子女最多一个父亲和一个母亲、父母出生年早于子女、父母代数小于子女、婚姻关系有序去重。跨行数据库触发器仍按 M5 继续处理。
-- 新增迁移 `eb4cc1a0641e_add_relation_constraints_and_indexes.py`，为同一子女同一父母角色添加唯一约束。
-- 补充 M3 测试，覆盖成员编辑、父母唯一性和婚姻去重。
-- 验证结果：
-  - `flask --app app db upgrade` 成功。
-  - `flask --app app db current` 返回 `eb4cc1a0641e (head)`。
-  - `flask --app app routes` 成功列出 M3 新路由。
-  - `pytest` 通过，结果为 `3 passed`。
+- `[x]` 新增 JSON 接口：`/genealogies/<id>/tree-roots`，最多返回 50 个根成员。
+- `[x]` 新增 JSON 接口：`/genealogies/<id>/tree-node/<member_id>`，用于按成员 ID 定位。
+- `[x]` 新增 JSON 接口：`/genealogies/<id>/tree-node/<member_id>/children`，最多返回一层 100 个子女。
+- `[x]` 新增 JSON 接口：`/genealogies/<id>/tree-node/<member_id>/parents`，最多返回 2 个父母。
+- `[x]` 树形预览页新增 SVG 图形树工具区，支持加载根成员、按 ID 定位、清空画布、向上/向下展开。
+- `[x]` 当前图形画布最多显示 500 个节点，避免再次出现大数据量下浏览器无响应。
+- `[x]` 原递归 CTE 缩进树保留在页面下方，但已改为按需加载；默认进入页面不再执行缩进树递归查询。
+- `[x]` 新增接口测试：未登录保护、根节点查询、一层子女查询、父母查询、跨族谱成员隔离。
+- `[x]` 验证结果：`pytest` 为 `12 passed`，`compileall` 通过，`flask --app app routes` 可列出新增接口。
 
-### 2026-04-29 第四轮
+## 2026-05-13 缩进树大数据加载优化记录
 
-- 完成 M4 递归查询与树形展示的可演示版本。
-- 新增直系后代查询路由 `/members/<id>/descendants` 和页面。
-- 将族谱树形预览改为递归 CTE 缩进树，最多展示 500 行，递归深度限制为 12 层用于页面稳定演示。
-- 优化亲缘链路查询，返回每一步关系类型，并在页面展示“父亲、母亲、子女、配偶”等关系标签。
-- 新增 `sql/queries/05_tree_preview.sql`，并更新亲缘链路 SQL 输出关系类型。
-- 更新祖先和后代 SQL，加入深度限制与循环保护。
-- 成员列表增加后代查询入口和亲缘链路查询表单。
-- 将递归 CTE 的访问路径从 PostgreSQL 数组改为逗号分隔字符串，兼容 PostgreSQL 和 SQLite 测试库。
-- 补充 M4 测试，覆盖后代查询、树形预览和亲缘路径关系标签。
-- 验证结果：
-  - `flask --app app routes` 成功列出 M4 新路由。
-  - `pytest` 通过，结果为 `4 passed`。
-  - `compileall` 通过。
+- `[x]` 发现问题：图形树已懒加载，但树页面默认仍会执行缩进树递归 CTE，6000/50000 人族谱打开页面仍可能变慢。
+- `[x]` 修复方式：`/genealogies/<id>/tree` 默认不查询缩进树；只有访问 `/genealogies/<id>/tree?show_indent=1` 或点击“加载缩进树”时才执行递归查询。
+- `[x]` 页面提示已更新：大族谱优先使用图形树逐层展开，缩进树作为报告截图和备选展示。
 
-### 2026-04-30 第五轮
+## 可加分但非必需的扩展
 
-- 完成 M5 数据库结构、DDL 与约束。
-- 新增迁移 `8ef1ddc6ab24_add_relationship_integrity_triggers.py`。
-- 新增 PostgreSQL 触发器：
-  - `trg_validate_parent_child_relation`：校验父母与子女同族谱、父母代数小于子女、父母出生年早于子女。
-  - `trg_validate_marriage_relation`：校验配偶双方属于同一族谱。
-  - `trg_validate_member_existing_relations`：更新成员族谱、生年、代数时，防止破坏已有父子或婚姻关系。
-- 同步更新 `sql/schema.sql`，让手工建库 DDL 与迁移保持一致。
-- 新增 `docs/data_model.md`，包含 E-R 图、关系模式、约束策略、3NF 说明和索引说明。
-- 补充数据库工件测试，确保触发器迁移、schema 和数据模型文档存在关键内容。
-- 使用事务内 smoke test 验证触发器：
-  - 非法父子关系被触发器拒绝。
-  - 跨族谱婚姻被触发器拒绝。
-  - 测试数据已回滚，不污染开发库。
-- 验证结果：
-  - `flask --app app db upgrade` 成功。
-  - `flask --app app db current` 返回 `8ef1ddc6ab24 (head)`。
-  - `flask --app app routes` 成功。
-  - `pytest` 通过，结果为 `7 passed`。
-  - `compileall app scripts migrations` 成功。
-
-### 2026-05-01 第六轮
-
-- 完成 M6 数据生成、导入与导出主体实现。
-- 重写 `scripts/seed_data.py`：
-  - 默认生成 10 个族谱。
-  - 默认生成 104000 个成员。
-  - 最大单族谱 50000 个成员。
-  - 每个族谱 30 代。
-  - 每个成员至少有一条婚姻或血缘边。
-- 新增 `scripts/import_csv.py`，使用 PostgreSQL `COPY` 从 CSV 导入，并支持 `--truncate` 清空重导。
-- 重写 `scripts/export_branch.py`，支持按成员 ID 导出该成员及所有递归后代、分支内父子关系和婚姻关系。
-- 新增 `sql/copy_import.sql`，提供 psql 手工 `\copy` 导入示例。
-- 新增 `docs/data_pipeline.md`，说明生成、导入、分支导出和验收 SQL。
-- 新增数据生成测试，校验小规模生成结果的成员数、父子关系、婚姻关系和每个成员至少存在一条边。
-- 实际运行默认生成，产出 `data/generated`：
-  - 族谱数：10
-  - 成员数：104000
-  - 最大单族谱成员数：50000
-  - 最大代际深度：30
-  - 无边成员数：0
-  - 父子关系数：201064
-  - 婚姻关系数：52000
-- 验证结果：
-  - `pytest` 通过，结果为 `8 passed`。
-  - `compileall app scripts migrations` 成功。
-  - `scripts/import_csv.py --help` 成功。
-  - `scripts/export_branch.py --help` 成功。
-
-### 2026-05-02 第七轮
-
-- 完成项目收尾，覆盖 M7 和 M8。
-- 新增 `scripts/db_smoke_test.py`，输出族谱数、成员数、最大单族谱成员数、最大代际深度、无边成员数和大数据验收状态。
-- 新增 `scripts/explain_performance.py`，自动生成四代查询有/无索引 EXPLAIN 对比报告；无索引场景在事务中临时 DROP INDEX 后回滚，不会永久删除索引。
-- 新增 `scripts/create_demo_data.py`，创建演示账号 `demo@example.com` / `demo123456` 和三代演示族谱。
-- 新增 `docs/demo_guide.md`、`docs/backup_restore.md`、`docs/report_outline.md`。
-- 生成 `docs/performance_results.md`，包含无索引和有索引执行计划及耗时对比。
-- 更新 VSCode tasks：创建演示数据、数据库验收、性能对比。
-- 最终验证结果：
-  - `pytest` 通过，结果为 `10 passed`。
-  - `compileall app scripts migrations` 成功。
-  - `.vscode/tasks.json` JSON 校验成功。
-  - `flask --app app routes` 成功。
-  - `scripts/db_smoke_test.py` 成功；当前库为小型演示数据，大数据验收状态为 `PENDING`，导入 `data/generated` 后会变为 `PASS`。
-
-## 下次建议优先级
-
-1. 答辩前如需展示 10 万级数据，执行 `scripts/import_csv.py --input-dir data/generated --truncate`。
-2. 导入大数据后重新运行 `scripts/db_smoke_test.py` 和 `scripts/explain_performance.py` 并截图。
-3. 按 `docs/demo_guide.md` 的截图清单补齐报告截图。
-4. 如 VSCode 终端仍无法识别 `psql`，使用 Python 脚本完成验收，或在系统终端中运行 `psql`。
+1. 协作者角色权限细化：`viewer` 只能查看，`editor` 才能新增/编辑/删除。
+2. 图形树交互增强：增加缩放、拖拽、节点折叠动画和按姓名搜索定位。
+3. 成员详情页：集中展示个人资料、父母、配偶、子女、祖先/后代入口。
+4. 导入校验报告：导入 CSV 前检查孤立成员、非法代数、重复婚姻、父母角色冲突。
+5. 操作审计日志：记录谁在什么时候修改了成员和关系，报告里会显得更完整。
+6. 备份恢复一键任务：把 `pg_dump`、`COPY` 分支导出和 smoke test 串成一个 VSCode task。

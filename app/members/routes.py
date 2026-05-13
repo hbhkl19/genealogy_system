@@ -1,3 +1,5 @@
+from collections import deque
+
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
@@ -352,7 +354,10 @@ def _bfs_reachable(genealogy_id, root_id, max_depth):
     if max_depth >= 8:
         try:
             rows = db.session.execute(
-                text("SELECT member_id, depth FROM bfs_reachable(:gid, :rid, :md)"),
+                text(
+                    "SELECT member_id, depth FROM bfs_reachable("
+                    "CAST(:gid AS INTEGER), CAST(:rid AS INTEGER), CAST(:md AS INTEGER))"
+                ),
                 {"gid": genealogy_id, "rid": root_id, "md": max_depth},
             ).fetchall()
             return {r[0]: r[1] for r in rows}
@@ -376,6 +381,50 @@ def _bfs_reachable(genealogy_id, root_id, max_depth):
         {"genealogy_id": genealogy_id, "root_id": root_id, "max_depth": max_depth},
     ).fetchall()
     return {r[0]: r[1] for r in rows}
+
+
+def _is_sqlite():
+    return db.session.get_bind().dialect.name == "sqlite"
+
+
+def _sqlite_shortest_path(genealogy_id, start_id, end_id, max_depth=18):
+    """SQLite test fallback for the PostgreSQL-optimized kinship search."""
+    rows = db.session.execute(
+        text(
+            """
+            SELECT parent_member_id AS from_id, child_member_id AS to_id, 'child' AS relation_type
+            FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+            UNION ALL
+            SELECT child_member_id, parent_member_id, parent_role
+            FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+            UNION ALL
+            SELECT spouse1_member_id, spouse2_member_id, 'spouse'
+            FROM marriages WHERE genealogy_id = :genealogy_id
+            UNION ALL
+            SELECT spouse2_member_id, spouse1_member_id, 'spouse'
+            FROM marriages WHERE genealogy_id = :genealogy_id
+            """
+        ),
+        {"genealogy_id": genealogy_id},
+    ).mappings().all()
+    graph = {}
+    for row in rows:
+        graph.setdefault(row["from_id"], []).append((row["to_id"], row["relation_type"]))
+
+    queue = deque([(start_id, [start_id], [])])
+    visited = {start_id}
+    while queue:
+        member_id, path_ids, relation_types = queue.popleft()
+        if member_id == end_id:
+            return path_ids, relation_types
+        if len(relation_types) >= max_depth:
+            continue
+        for next_id, relation_type in graph.get(member_id, []):
+            if next_id in visited:
+                continue
+            visited.add(next_id)
+            queue.append((next_id, path_ids + [next_id], relation_types + [relation_type]))
+    return None, None
 
 
 NEIGHBOR_QUERY = """
@@ -471,14 +520,16 @@ def _lookup_relations_batch(genealogy_id, path_ids):
     n = len(path_ids) - 1
     gid = genealogy_id
 
-    values_clause = ", ".join(f"(CAST(:a{i} AS INTEGER), CAST(:b{i} AS INTEGER))" for i in range(n))
+    values_clause = ", ".join(
+        f"({i}, CAST(:a{i} AS INTEGER), CAST(:b{i} AS INTEGER))" for i in range(n)
+    )
     params = {"gid": gid}
     for i in range(n):
         params[f"a{i}"] = path_ids[i]
         params[f"b{i}"] = path_ids[i + 1]
 
     sql = f"""
-        SELECT p.a, p.b,
+        SELECT p.idx, p.a, p.b,
             CASE
                 WHEN EXISTS(SELECT 1 FROM parent_child_relations
                             WHERE parent_member_id=p.a AND child_member_id=p.b
@@ -495,16 +546,17 @@ def _lookup_relations_batch(genealogy_id, path_ids):
                               OR (spouse1_member_id=p.b AND spouse2_member_id=p.a)))
                 THEN 'spouse'
             END AS relation
-        FROM (VALUES {values_clause}) AS p(a, b)
-        ORDER BY p.a
+        FROM (VALUES {values_clause}) AS p(idx, a, b)
+        ORDER BY p.idx
     """
     rows = db.session.execute(text(sql), params).fetchall()
-    return [r[2] if r[2] else "?" for r in rows]
+    return [r[3] if r[3] else "?" for r in rows]
 
 
 RELATION_LABELS = {
     "father": "父亲",
     "mother": "母亲",
+    "parent": "父母",
     "child": "子女",
     "spouse": "配偶",
 }
@@ -540,9 +592,13 @@ def relationship_path():
     full_path_ids = None
     relation_types = None
 
+    use_sqlite_fallback = _is_sqlite()
+    if use_sqlite_fallback:
+        full_path_ids, relation_types = _sqlite_shortest_path(gid, start_id, end_id)
+
     # --- Progressive bidirectional BFS ---
     # Try shallow depths first (fast for common close relations)
-    for max_depth in (6, 8, 10, 12, 15):
+    for max_depth in (() if use_sqlite_fallback else (6, 8, 10, 12, 15)):
         fwd = _bfs_reachable(gid, start_id, max_depth)
         rev = _bfs_reachable(gid, end_id, max_depth)
         meeting = set(fwd.keys()) & set(rev.keys())
