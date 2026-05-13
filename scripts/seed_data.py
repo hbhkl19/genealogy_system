@@ -162,16 +162,16 @@ def write_members_for_genealogy(
                 current_couples.append((spouse1_id, spouse2_id))
                 married_year = birth_year_for(generation_no, rng) + rng.randint(22, 28)
                 marriages_writer.writerow(
-                {
-                    "id": counters.marriage_id,
-                    "genealogy_id": genealogy_id,
-                    "spouse1_member_id": min(spouse1_id, spouse2_id),
-                    "spouse2_member_id": max(spouse1_id, spouse2_id),
-                    "married_year": married_year,
-                    "ended_year": "",
-                }
-            )
-            counters.marriage_id += 1
+                    {
+                        "id": counters.marriage_id,
+                        "genealogy_id": genealogy_id,
+                        "spouse1_member_id": min(spouse1_id, spouse2_id),
+                        "spouse2_member_id": max(spouse1_id, spouse2_id),
+                        "married_year": married_year,
+                        "ended_year": "",
+                    }
+                )
+                counters.marriage_id += 1
 
         previous_couples = current_couples
 
@@ -188,7 +188,7 @@ def generate_dataset(output_dir: Path, sizes: list[int], generations: int, seed:
         genealogies_handle, genealogies_writer = open_writer(
             output_dir,
             "genealogies",
-            ["id", "name", "description", "owner_id"],
+            ["id", "name", "surname", "revision_year", "description", "owner_id"],
         )
         members_handle, members_writer = open_writer(
             output_dir,
@@ -235,6 +235,8 @@ def generate_dataset(output_dir: Path, sizes: list[int], generations: int, seed:
                 {
                     "id": genealogy_index,
                     "name": f"实验族谱 {genealogy_index}",
+                    "surname": f"实验姓{genealogy_index}",
+                    "revision_year": 2026,
                     "description": f"自动生成族谱，目标成员数 {target_size}。",
                     "owner_id": 1,
                 }

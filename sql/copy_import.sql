@@ -11,7 +11,7 @@ TRUNCATE
 RESTART IDENTITY CASCADE;
 
 \copy users (id, username, email, password_hash) FROM 'data/generated/users.csv' WITH (FORMAT csv, HEADER true);
-\copy genealogies (id, name, description, owner_id) FROM 'data/generated/genealogies.csv' WITH (FORMAT csv, HEADER true);
+\copy genealogies (id, name, surname, revision_year, description, owner_id) FROM 'data/generated/genealogies.csv' WITH (FORMAT csv, HEADER true);
 \copy genealogy_collaborators (id, genealogy_id, user_id, role) FROM 'data/generated/genealogy_collaborators.csv' WITH (FORMAT csv, HEADER true);
 \copy members (id, genealogy_id, name, gender, birth_year, death_year, biography, generation_no) FROM 'data/generated/members.csv' WITH (FORMAT csv, HEADER true);
 \copy parent_child_relations (id, genealogy_id, parent_member_id, child_member_id, parent_role) FROM 'data/generated/parent_child_relations.csv' WITH (FORMAT csv, HEADER true);

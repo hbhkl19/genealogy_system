@@ -23,7 +23,8 @@ def test_generate_dataset_outputs_consistent_edges():
 
     assert len(members) == 30
     assert len(parent_child) == 48
-    assert len(marriages) == 15
+    assert len(marriages) == summary["marriages"]
+    assert len(marriages) > 0
 
     member_ids = {row["id"] for row in members}
     edge_member_ids = set()

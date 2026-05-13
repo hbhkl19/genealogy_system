@@ -2,16 +2,259 @@
 {% block title %}树形预览{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">{{ genealogy.name }}树形预览</h1>
-<div class="tree-list">
-  {% for row in rows %}
-    <div class="tree-node" style="--depth: {{ row.depth }}">
-      <span class="tree-indent"></span>
-      <span class="badge text-bg-light">第 {{ row.generation_no }} 代</span>
-      <a href="{{ url_for('members.relations', id=row.id) }}">{{ row.name }}</a>
-      <span class="text-secondary">#{{ row.id }}</span>
+<section class="lazy-tree-panel mb-4">
+  <div class="lazy-tree-toolbar">
+    <button class="btn btn-primary" type="button" id="loadRootsButton">加载根成员</button>
+    <div class="lazy-tree-search">
+      <input class="form-control" id="focusMemberInput" type="number" min="1" placeholder="输入成员 ID 定位">
+      <button class="btn btn-outline-secondary" type="button" id="focusMemberButton">定位</button>
     </div>
+    <button class="btn btn-outline-secondary" type="button" id="clearTreeButton">清空画布</button>
+  </div>
+  <div class="lazy-tree-status" id="lazyTreeStatus">图形树不会一次性加载全族谱，请先加载根成员或输入成员 ID 定位。</div>
+  <div class="lazy-tree-canvas" id="lazyTreeCanvas">
+    <svg id="lazyTreeSvg" width="960" height="420" role="img" aria-label="懒加载图形族谱树"></svg>
+  </div>
+</section>
+
+<div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+  <h2 class="h5 mb-0">缩进树备选预览</h2>
+  {% if show_indent %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('genealogies.tree', id=genealogy.id) }}">隐藏缩进树</a>
   {% else %}
-    <div class="empty-state">暂无可展示成员。添加成员和父子关系后可查看缩进树。</div>
-  {% endfor %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('genealogies.tree', id=genealogy.id, show_indent=1) }}">加载缩进树</a>
+  {% endif %}
 </div>
+<div class="tree-list">
+  {% if show_indent %}
+    {% for row in rows %}
+      <div class="tree-node" style="--depth: {{ row.depth }}">
+        <span class="tree-indent"></span>
+        <span class="badge text-bg-light">第 {{ row.generation_no }} 代</span>
+        <a href="{{ url_for('members.relations', id=row.id) }}">{{ row.name }}</a>
+        <span class="text-secondary">#{{ row.id }}</span>
+      </div>
+    {% else %}
+      <div class="empty-state">暂无可展示成员。添加成员和父子关系后可查看缩进树。</div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">缩进树使用递归查询，已改为按需加载。大族谱建议优先使用上方图形树逐层展开。</div>
+  {% endif %}
+</div>
+<script>
+  (() => {
+    const genealogyId = {{ genealogy.id }};
+    const nodeLimit = 500;
+    const nodeWidth = 168;
+    const nodeHeight = 74;
+    const columnGap = 220;
+    const rowGap = 112;
+    const svg = document.getElementById("lazyTreeSvg");
+    const status = document.getElementById("lazyTreeStatus");
+    const nodes = new Map();
+    const edges = new Set();
+    const expandedChildren = new Set();
+    const expandedParents = new Set();
+    let activeNodeId = null;
+
+    function setStatus(message, kind = "info") {
+      status.textContent = message;
+      status.dataset.kind = kind;
+    }
+
+    function escapeText(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      }[char]));
+    }
+
+    async function getJson(url) {
+      const response = await fetch(url, {headers: {"Accept": "application/json"}});
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function addNode(member) {
+      if (nodes.has(member.id)) {
+        nodes.set(member.id, {...nodes.get(member.id), ...member});
+        return false;
+      }
+      if (nodes.size >= nodeLimit) {
+        setStatus("当前可视节点已达到 500 个，请清空画布后通过成员 ID 定位继续查看。", "warning");
+        return false;
+      }
+      nodes.set(member.id, member);
+      return true;
+    }
+
+    function addEdge(parentId, childId) {
+      if (nodes.has(parentId) && nodes.has(childId)) {
+        edges.add(`${parentId}->${childId}`);
+      }
+    }
+
+    function clearTree() {
+      nodes.clear();
+      edges.clear();
+      expandedChildren.clear();
+      expandedParents.clear();
+      activeNodeId = null;
+      draw();
+      setStatus("画布已清空。");
+    }
+
+    function groupedNodes() {
+      const groups = new Map();
+      for (const node of nodes.values()) {
+        const generation = node.generation_no || 1;
+        if (!groups.has(generation)) {
+          groups.set(generation, []);
+        }
+        groups.get(generation).push(node);
+      }
+      return [...groups.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([generation, members]) => [
+          generation,
+          members.sort((a, b) => a.id - b.id),
+        ]);
+    }
+
+    function layoutNodes() {
+      const positions = new Map();
+      const groups = groupedNodes();
+      groups.forEach(([generation, members], columnIndex) => {
+        members.forEach((member, rowIndex) => {
+          positions.set(member.id, {
+            x: 28 + columnIndex * columnGap,
+            y: 28 + rowIndex * rowGap,
+            generation,
+          });
+        });
+      });
+      const maxRows = Math.max(1, ...groups.map(([, members]) => members.length));
+      svg.setAttribute("width", Math.max(960, 72 + groups.length * columnGap));
+      svg.setAttribute("height", Math.max(420, 80 + maxRows * rowGap));
+      return positions;
+    }
+
+    function draw() {
+      const positions = layoutNodes();
+      const edgeMarkup = [...edges].map((edgeKey) => {
+        const [parentId, childId] = edgeKey.split("->").map(Number);
+        const parent = positions.get(parentId);
+        const child = positions.get(childId);
+        if (!parent || !child) return "";
+        const x1 = parent.x + nodeWidth;
+        const y1 = parent.y + nodeHeight / 2;
+        const x2 = child.x;
+        const y2 = child.y + nodeHeight / 2;
+        return `<line class="lazy-tree-edge" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+      }).join("");
+
+      const nodeMarkup = [...nodes.values()].map((node) => {
+        const pos = positions.get(node.id);
+        const genderClass = `gender-${node.gender || "unknown"}`;
+        const activeClass = node.id === activeNodeId ? " is-active" : "";
+        const canExpandParents = node.has_parents ? "" : " is-disabled";
+        const canExpandChildren = node.has_children ? "" : " is-disabled";
+        return `
+          <g class="lazy-tree-node ${genderClass}${activeClass}" transform="translate(${pos.x}, ${pos.y})">
+            <rect width="${nodeWidth}" height="${nodeHeight}" rx="8"></rect>
+            <text class="lazy-tree-name" x="12" y="24">${escapeText(node.name)}</text>
+            <text class="lazy-tree-meta" x="12" y="46">#${node.id} · 第 ${node.generation_no || ""} 代</text>
+            <g class="lazy-tree-action${canExpandParents}" data-action="parents" data-id="${node.id}" transform="translate(112, 50)">
+              <rect width="22" height="18" rx="4"></rect><text x="7" y="13">↑</text>
+            </g>
+            <g class="lazy-tree-action${canExpandChildren}" data-action="children" data-id="${node.id}" transform="translate(138, 50)">
+              <rect width="22" height="18" rx="4"></rect><text x="7" y="13">↓</text>
+            </g>
+          </g>`;
+      }).join("");
+
+      svg.innerHTML = edgeMarkup + nodeMarkup;
+    }
+
+    async function loadRoots() {
+      try {
+        setStatus("正在加载根成员...");
+        const data = await getJson(`/genealogies/${genealogyId}/tree-roots`);
+        data.members.forEach(addNode);
+        activeNodeId = data.members[0]?.id ?? null;
+        draw();
+        setStatus(`已加载 ${data.members.length} 个根成员，点击节点右下角箭头继续展开。`);
+      } catch (error) {
+        setStatus(`根成员加载失败：${error.message}`, "danger");
+      }
+    }
+
+    async function focusMember() {
+      const memberId = Number(document.getElementById("focusMemberInput").value);
+      if (!memberId) {
+        setStatus("请输入有效的成员 ID。", "warning");
+        return;
+      }
+      try {
+        setStatus("正在定位成员...");
+        const data = await getJson(`/genealogies/${genealogyId}/tree-node/${memberId}`);
+        addNode(data.member);
+        activeNodeId = data.member.id;
+        draw();
+        setStatus(`已定位到 ${data.member.name} #${data.member.id}，可继续向上或向下展开。`);
+      } catch (error) {
+        setStatus(`成员定位失败：请确认该 ID 属于当前族谱。`, "danger");
+      }
+    }
+
+    async function expandNode(memberId, direction) {
+      const loadedSet = direction === "children" ? expandedChildren : expandedParents;
+      if (loadedSet.has(memberId)) {
+        setStatus("该方向已经展开过。");
+        return;
+      }
+      try {
+        activeNodeId = memberId;
+        setStatus("正在加载相邻成员...");
+        const data = await getJson(`/genealogies/${genealogyId}/tree-node/${memberId}/${direction}`);
+        data.members.forEach((member) => {
+          addNode(member);
+          if (direction === "children") {
+            addEdge(memberId, member.id);
+          } else {
+            addEdge(member.id, memberId);
+          }
+        });
+        loadedSet.add(memberId);
+        draw();
+        setStatus(`已加载 ${data.members.length} 个${direction === "children" ? "子女" : "父母"}节点。当前可视节点：${nodes.size}/${nodeLimit}。`);
+      } catch (error) {
+        setStatus(`节点展开失败：${error.message}`, "danger");
+      }
+    }
+
+    svg.addEventListener("click", (event) => {
+      const target = event.target.closest(".lazy-tree-action");
+      if (!target || target.classList.contains("is-disabled")) return;
+      expandNode(Number(target.dataset.id), target.dataset.action);
+    });
+
+    document.getElementById("loadRootsButton").addEventListener("click", loadRoots);
+    document.getElementById("focusMemberButton").addEventListener("click", focusMember);
+    document.getElementById("clearTreeButton").addEventListener("click", clearTree);
+    document.getElementById("focusMemberInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        focusMember();
+      }
+    });
+
+    draw();
+  })();
+</script>
 {% endblock %}

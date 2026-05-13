@@ -68,6 +68,130 @@ body {
   flex: 0 0 calc(var(--depth, 0) * 28px);
 }
 
+.lazy-tree-panel {
+  background: #fff;
+  border: 1px solid #e7e3dc;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.lazy-tree-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.lazy-tree-search {
+  display: flex;
+  gap: 8px;
+  min-width: min(100%, 320px);
+}
+
+.lazy-tree-search .form-control {
+  min-width: 0;
+}
+
+.lazy-tree-status {
+  color: #5e5e5e;
+  background: #f7f7f5;
+  border: 1px solid #e7e3dc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.lazy-tree-status[data-kind="warning"] {
+  color: #6f4b00;
+  background: #fff7df;
+  border-color: #ead28b;
+}
+
+.lazy-tree-status[data-kind="danger"] {
+  color: #842029;
+  background: #f8d7da;
+  border-color: #f1aeb5;
+}
+
+.lazy-tree-canvas {
+  overflow: auto;
+  border: 1px solid #ddd7cc;
+  border-radius: 8px;
+  background: #fbfaf7;
+  max-height: 560px;
+}
+
+#lazyTreeSvg {
+  display: block;
+  min-width: 960px;
+  min-height: 420px;
+}
+
+.lazy-tree-edge {
+  stroke: #a89d8d;
+  stroke-width: 2;
+}
+
+.lazy-tree-node rect {
+  fill: #fff;
+  stroke: #9b9489;
+  stroke-width: 1.5;
+}
+
+.lazy-tree-node.gender-male rect {
+  stroke: #4c78a8;
+}
+
+.lazy-tree-node.gender-female rect {
+  stroke: #d46a92;
+}
+
+.lazy-tree-node.gender-unknown rect {
+  stroke: #8a8f98;
+}
+
+.lazy-tree-node.is-active rect {
+  stroke-width: 3;
+}
+
+.lazy-tree-name {
+  fill: #252525;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.lazy-tree-meta {
+  fill: #6f6f6f;
+  font-size: 12px;
+}
+
+.lazy-tree-action {
+  cursor: pointer;
+}
+
+.lazy-tree-action rect {
+  fill: #f3f0ea;
+  stroke: #c9c0b3;
+  stroke-width: 1;
+}
+
+.lazy-tree-action text {
+  fill: #5c5246;
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.lazy-tree-action:hover rect {
+  fill: #e7e0d5;
+}
+
+.lazy-tree-action.is-disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
 .path-steps {
   display: grid;
   gap: 8px;

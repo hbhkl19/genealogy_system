@@ -21,6 +21,7 @@ def test_schema_contains_trigger_definitions():
     assert "CREATE OR REPLACE FUNCTION validate_parent_child_relation" in schema
     assert "CREATE TRIGGER trg_validate_parent_child_relation" in schema
     assert "CREATE TRIGGER trg_validate_member_existing_relations" in schema
+    assert "CREATE OR REPLACE FUNCTION bfs_reachable" in schema
 
 
 def test_data_model_document_covers_er_and_3nf():
