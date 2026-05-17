@@ -257,6 +257,10 @@ def test_lazy_tree_json_endpoints(app, client):
     assert parents.status_code == 200
     assert {member["id"] for member in parents.json["members"]} == {ids["father_id"], ids["mother_id"]}
 
+    mother_children = client.get(f"/genealogies/{ids['genealogy_id']}/tree-node/{ids['mother_id']}/children")
+    assert mother_children.status_code == 200
+    assert mother_children.json["members"] == []
+
     cross_genealogy = client.get(f"/genealogies/{ids['genealogy_id']}/tree-node/{other_member_id}")
     assert cross_genealogy.status_code == 404
 

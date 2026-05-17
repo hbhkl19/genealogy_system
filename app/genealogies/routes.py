@@ -41,19 +41,21 @@ def update_genealogy_from_form(genealogy):
 
 
 def member_payload(member):
-    has_children = db.session.execute(
-        text(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM parent_child_relations
-                WHERE genealogy_id = :genealogy_id
-                  AND parent_member_id = :member_id
-            )
-            """
-        ),
-        {"genealogy_id": member.genealogy_id, "member_id": member.id},
-    ).scalar()
+    has_children = False
+    if member.gender != "female":
+        has_children = db.session.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM parent_child_relations
+                    WHERE genealogy_id = :genealogy_id
+                      AND parent_member_id = :member_id
+                )
+                """
+            ),
+            {"genealogy_id": member.genealogy_id, "member_id": member.id},
+        ).scalar()
     has_parents = db.session.execute(
         text(
             """
@@ -116,10 +118,12 @@ def indent_tree_spouses(member):
 
 
 def indent_member_payload(member):
-    has_children = ParentChildRelation.query.filter(
-        ParentChildRelation.genealogy_id == member.genealogy_id,
-        ParentChildRelation.parent_member_id == member.id,
-    ).first() is not None
+    has_children = False
+    if member.gender != "female":
+        has_children = ParentChildRelation.query.filter(
+            ParentChildRelation.genealogy_id == member.genealogy_id,
+            ParentChildRelation.parent_member_id == member.id,
+        ).first() is not None
     return {
         "id": member.id,
         "name": member.name,
@@ -311,6 +315,12 @@ def tree_roots(id):
 def tree_children(id, member_id):
     get_accessible_genealogy(id)
     member = get_genealogy_member_or_404(id, member_id)
+    if member.gender == "female":
+        return jsonify({
+            "member": {"id": member.id, "name": member.name, "gender": member.gender},
+            "spouses": indent_tree_spouses(member),
+            "children": [],
+        })
     children = (
         Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)
         .filter(
@@ -369,7 +379,9 @@ def svg_tree_node(id, member_id):
 @login_required
 def svg_tree_node_children(id, member_id):
     get_accessible_genealogy(id)
-    get_genealogy_member_or_404(id, member_id)
+    member = get_genealogy_member_or_404(id, member_id)
+    if member.gender == "female":
+        return jsonify({"members": []})
     limit = min(request.args.get("limit", 100, type=int) or 100, 100)
     children = (
         Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)

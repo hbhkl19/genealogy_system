@@ -148,7 +148,7 @@ def generate_dataset(
     try:
         users_handle, users_writer = open_writer(output_dir, "users", ["id", "username", "email", "password_hash"])
         genealogies_handle, genealogies_writer = open_writer(
-            output_dir, "genealogies", ["id", "name", "description", "owner_id"],
+            output_dir, "genealogies", ["id", "name", "surname", "revision_year", "description", "owner_id"],
         )
         members_handle, members_writer = open_writer(
             output_dir, "members",
@@ -182,6 +182,8 @@ def generate_dataset(
             genealogies_writer.writerow({
                 "id": gid,
                 "name": f"{SURNAMES[gi]}氏族谱",
+                "surname": SURNAMES[gi],
+                "revision_year": 2026,
                 "description": f"{SURNAMES[gi]}氏家族族谱，目标成员数 {sizes[gi]}。",
                 "owner_id": 1,
             })
@@ -374,12 +376,6 @@ def generate_dataset(
                 and (min(member["id"], candidate["id"]), max(member["id"], candidate["id"])) not in marriage_pairs
                 and candidate["gid"] != member["gid"]
             ]
-            if not candidates:
-                candidates = [
-                    candidate for candidate in all_member_entries
-                    if candidate["id"] != member["id"]
-                    and (min(member["id"], candidate["id"]), max(member["id"], candidate["id"])) not in marriage_pairs
-                ]
             if not candidates:
                 continue
             spouse = rng.choice(candidates)
