@@ -16,12 +16,11 @@
       <form method="post" class="row g-2">
         <input type="hidden" name="action" value="add_parent">
         <div class="col-sm-7">
-          <select class="form-select" name="parent_member_id" required>
-            <option value="">选择父母成员</option>
-            {% for candidate in candidates %}
-              <option value="{{ candidate.id }}">#{{ candidate.id }} {{ candidate.name }}（第 {{ candidate.generation_no }} 代）</option>
-            {% endfor %}
-          </select>
+          <div class="member-autocomplete" data-gid="{{ genealogy_id }}" data-exclude="{{ member.id }}">
+            <input type="text" class="form-control" placeholder="输入姓名或 ID 搜索成员..." autocomplete="off">
+            <input type="hidden" name="parent_member_id" value="">
+            <ul class="autocomplete-dropdown"></ul>
+          </div>
         </div>
         <div class="col-sm-3">
           <select class="form-select" name="parent_role">
@@ -57,12 +56,11 @@
       <form method="post" class="row g-2">
         <input type="hidden" name="action" value="add_child">
         <div class="col-sm-7">
-          <select class="form-select" name="child_member_id" required>
-            <option value="">选择子女成员</option>
-            {% for candidate in candidates %}
-              <option value="{{ candidate.id }}">#{{ candidate.id }} {{ candidate.name }}（第 {{ candidate.generation_no }} 代）</option>
-            {% endfor %}
-          </select>
+          <div class="member-autocomplete" data-gid="{{ genealogy_id }}" data-exclude="{{ member.id }}">
+            <input type="text" class="form-control" placeholder="输入姓名或 ID 搜索成员..." autocomplete="off">
+            <input type="hidden" name="child_member_id" value="">
+            <ul class="autocomplete-dropdown"></ul>
+          </div>
         </div>
         <div class="col-sm-3">
           <select class="form-select" name="parent_role">
@@ -98,12 +96,11 @@
       <form method="post" class="row g-2">
         <input type="hidden" name="action" value="add_marriage">
         <div class="col-md-5">
-          <select class="form-select" name="spouse_member_id" required>
-            <option value="">选择配偶成员</option>
-            {% for candidate in candidates %}
-              <option value="{{ candidate.id }}">#{{ candidate.id }} {{ candidate.name }}（第 {{ candidate.generation_no }} 代）</option>
-            {% endfor %}
-          </select>
+          <div class="member-autocomplete" data-gid="{{ genealogy_id }}" data-exclude="{{ member.id }}">
+            <input type="text" class="form-control" placeholder="输入姓名或 ID 搜索成员..." autocomplete="off">
+            <input type="hidden" name="spouse_member_id" value="">
+            <ul class="autocomplete-dropdown"></ul>
+          </div>
         </div>
         <div class="col-md-2">
           <input class="form-control" name="married_year" type="number" placeholder="结婚年">
@@ -138,4 +135,126 @@
     </section>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var gid = {{ genealogy_id }};
+  var memberId = {{ member.id }};
+
+  function initAutocomplete(wrapper) {
+    var input = wrapper.querySelector('input[type="text"]');
+    var hidden = wrapper.querySelector('input[type="hidden"]');
+    var dropdown = wrapper.querySelector('.autocomplete-dropdown');
+    var gidVal = wrapper.dataset.gid;
+    var excludeVal = wrapper.dataset.exclude || '';
+    var activeIndex = -1;
+    var items = [];
+    var timer = null;
+
+    function clearDropdown() {
+      dropdown.innerHTML = '';
+      dropdown.classList.remove('show');
+      items = [];
+      activeIndex = -1;
+    }
+
+    function selectItem(idx) {
+      if (idx < 0 || idx >= items.length) return;
+      var m = items[idx];
+      hidden.value = m.id;
+      input.value = '#' + m.id + ' ' + m.name + ' (第' + m.generation_no + '代)';
+      input.dataset.selected = '1';
+      clearDropdown();
+    }
+
+    function renderItems(members) {
+      items = members;
+      dropdown.innerHTML = '';
+      if (members.length === 0) {
+        dropdown.innerHTML = '<li class="autocomplete-empty">未找到匹配成员</li>';
+      } else {
+        members.forEach(function (m, i) {
+          var li = document.createElement('li');
+          var genderEmoji = m.gender === 'male' ? '♂' : (m.gender === 'female' ? '♀' : '');
+          li.innerHTML = '<span class="ac-name">' + escapeHtml(m.name) + '</span>'
+            + ' <span class="ac-meta">#' + m.id + ' · 第' + m.generation_no + '代</span>'
+            + (genderEmoji ? ' <span class="ac-gender">' + genderEmoji + '</span>' : '');
+          li.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            selectItem(i);
+          });
+          dropdown.appendChild(li);
+        });
+      }
+      dropdown.classList.add('show');
+    }
+
+    function doSearch(q) {
+      if (!q) {
+        clearDropdown();
+        return;
+      }
+      var url = '/genealogies/' + gidVal + '/members/search?q=' + encodeURIComponent(q);
+      if (excludeVal) url += '&exclude=' + excludeVal;
+      fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(renderItems)
+        .catch(function () { clearDropdown(); });
+    }
+
+    input.addEventListener('input', function () {
+      delete input.dataset.selected;
+      hidden.value = '';
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () {
+        doSearch(input.value.trim());
+      }, 280);
+    });
+
+    input.addEventListener('focus', function () {
+      if (!input.dataset.selected && input.value.trim()) {
+        doSearch(input.value.trim());
+      }
+    });
+
+    input.addEventListener('keydown', function (e) {
+      var lis = dropdown.querySelectorAll('li:not(.autocomplete-empty)');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!dropdown.classList.contains('show')) {
+          doSearch(input.value.trim());
+          return;
+        }
+        activeIndex = Math.min(activeIndex + 1, lis.length - 1);
+        lis.forEach(function (li, i) { li.classList.toggle('active', i === activeIndex); });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIndex = Math.max(activeIndex - 1, -1);
+        lis.forEach(function (li, i) { li.classList.toggle('active', i === activeIndex); });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeIndex >= 0) selectItem(activeIndex);
+      } else if (e.key === 'Escape') {
+        clearDropdown();
+      }
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!wrapper.contains(e.target)) {
+        clearDropdown();
+      }
+    });
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  document.querySelectorAll('.member-autocomplete').forEach(initAutocomplete);
+})();
+</script>
 {% endblock %}

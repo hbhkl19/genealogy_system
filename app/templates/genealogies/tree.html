@@ -5,10 +5,12 @@
 
 <ul class="nav nav-tabs mb-3" id="treeTab" role="tablist">
   <li class="nav-item" role="presentation">
-    <button class="nav-link active" id="indent-tab" data-bs-toggle="tab" data-bs-target="#indent-panel" type="button" role="tab">缩进树</button>
+    <button class="nav-link active" id="indent-tab" data-bs-toggle="tab" data-bs-target="#indent-panel" type="button"
+      role="tab">缩进树</button>
   </li>
   <li class="nav-item" role="presentation">
-    <button class="nav-link" id="svg-tab" data-bs-toggle="tab" data-bs-target="#svg-panel" type="button" role="tab">图形树</button>
+    <button class="nav-link" id="svg-tab" data-bs-toggle="tab" data-bs-target="#svg-panel" type="button"
+      role="tab">图形树</button>
   </li>
 </ul>
 
@@ -22,8 +24,11 @@
       <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(2)">展开到第 2 代</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(3)">展开到第 3 代</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(5)">展开到第 5 代</button>
-      <div class="tree-id-search">
-        <input class="form-control form-control-sm" id="indentFocusMemberInput" type="number" min="1" placeholder="成员 ID">
+      <div class="tree-id-search member-autocomplete" data-gid="{{ genealogy.id }}">
+        <input class="form-control form-control-sm" id="indentFocusMemberInput" type="text" placeholder="搜索姓名或 ID 定位..."
+          autocomplete="off">
+        <input type="hidden" id="indentFocusMemberHidden" value="">
+        <ul class="autocomplete-dropdown"></ul>
         <button class="btn btn-sm btn-outline-secondary" type="button" onclick="focusIndentMember()">定位</button>
       </div>
     </div>
@@ -37,8 +42,11 @@
     <section class="lazy-tree-panel">
       <div class="lazy-tree-toolbar">
         <button class="btn btn-primary" type="button" id="loadRootsButton">加载根成员</button>
-        <div class="lazy-tree-search">
-          <input class="form-control" id="focusMemberInput" type="number" min="1" placeholder="输入成员 ID 定位">
+        <div class="lazy-tree-search member-autocomplete" data-gid="{{ genealogy.id }}">
+          <input class="form-control" id="focusMemberInput" type="text" placeholder="输入姓名或 ID 搜索定位..."
+            autocomplete="off">
+          <input type="hidden" id="focusMemberHidden" value="">
+          <ul class="autocomplete-dropdown"></ul>
           <button class="btn btn-outline-secondary" type="button" id="focusMemberButton">定位</button>
         </div>
         <button class="btn btn-outline-secondary" type="button" id="clearTreeButton">清空画布</button>
@@ -214,10 +222,10 @@
   }
 
   function focusIndentMember() {
-    var input = document.getElementById('indentFocusMemberInput');
-    var mid = parseInt(input.value, 10);
+    var hidden = document.getElementById('indentFocusMemberHidden');
+    var mid = parseInt(hidden.value, 10);
     if (!mid) {
-      document.getElementById('tree-info').innerHTML = '<span class="text-warning">请输入有效的成员 ID。</span>';
+      document.getElementById('tree-info').innerHTML = '<span class="text-warning">请先搜索并选择一个成员。</span>';
       return;
     }
     document.getElementById('tree-info').innerHTML = '正在定位成员 #' + mid + '...';
@@ -237,19 +245,104 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    var input = document.getElementById('indentFocusMemberInput');
-    if (input) {
-      input.addEventListener('keydown', function (event) {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          focusIndentMember();
-        }
-      });
+    var searchInput = document.getElementById('indentFocusMemberInput');
+    var searchHidden = document.getElementById('indentFocusMemberHidden');
+    if (!searchInput) return;
+    var searchDropdown = searchInput.parentElement.querySelector('.autocomplete-dropdown');
+    var searchTimer = null;
+    var searchItems = [];
+    var searchActive = -1;
+
+    function clearDropdown() {
+      searchDropdown.innerHTML = '';
+      searchDropdown.classList.remove('show');
+      searchItems = [];
+      searchActive = -1;
     }
+
+    function selectItem(idx) {
+      if (idx < 0 || idx >= searchItems.length) return;
+      var m = searchItems[idx];
+      searchHidden.value = m.id;
+      searchInput.value = '#' + m.id + ' ' + m.name + ' (' + m.generation_no + '代)';
+      searchInput.dataset.selected = '1';
+      clearDropdown();
+      focusIndentMember();
+    }
+
+    function renderItems(members) {
+      searchItems = members;
+      searchDropdown.innerHTML = '';
+      if (members.length === 0) {
+        searchDropdown.innerHTML = '<li class="autocomplete-empty">未找到匹配成员</li>';
+      } else {
+        members.forEach(function (m, i) {
+          var li = document.createElement('li');
+          var g = m.gender === 'male' ? '\u2642' : (m.gender === 'female' ? '\u2640' : '');
+          li.innerHTML = '<span class="ac-name">' + escapeHtml(m.name) + '</span>'
+            + ' <span class="ac-meta">#' + m.id + ' \u00b7 ' + m.generation_no + '\u4ee3</span>'
+            + (g ? ' <span class="ac-gender">' + g + '</span>' : '');
+          li.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            selectItem(i);
+          });
+          searchDropdown.appendChild(li);
+        });
+      }
+      searchDropdown.classList.add('show');
+    }
+
+    function doSearch(q) {
+      if (!q) { clearDropdown(); return; }
+      fetch('/genealogies/' + gid + '/members/search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(renderItems)
+        .catch(function () { clearDropdown(); });
+    }
+
+    searchInput.addEventListener('input', function () {
+      delete searchInput.dataset.selected;
+      searchHidden.value = '';
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { doSearch(searchInput.value.trim()); }, 280);
+    });
+
+    searchInput.addEventListener('focus', function () {
+      if (!searchInput.dataset.selected && searchInput.value.trim()) {
+        doSearch(searchInput.value.trim());
+      }
+    });
+
+    searchInput.addEventListener('keydown', function (e) {
+      var lis = searchDropdown.querySelectorAll('li:not(.autocomplete-empty)');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!searchDropdown.classList.contains('show')) { doSearch(searchInput.value.trim()); return; }
+        searchActive = Math.min(searchActive + 1, lis.length - 1);
+        lis.forEach(function (li, i) { li.classList.toggle('active', i === searchActive); });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        searchActive = Math.max(searchActive - 1, -1);
+        lis.forEach(function (li, i) { li.classList.toggle('active', i === searchActive); });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (searchActive >= 0) selectItem(searchActive);
+        else focusIndentMember();
+      } else if (e.key === 'Escape') {
+        clearDropdown();
+      }
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!searchInput.parentElement.contains(e.target)) {
+        clearDropdown();
+      }
+    });
   });
 
   function loadIndentRoots() {
     document.getElementById('indentFocusMemberInput').value = '';
+    document.getElementById('indentFocusMemberHidden').value = '';
     document.getElementById('tree-info').innerHTML = '正在加载初始预览...';
     document.getElementById('tree-container').innerHTML = '<div class="tree-loading">加载中...</div>';
     fetch('/genealogies/' + gid + '/tree/roots')
@@ -283,7 +376,7 @@
   function initSvgTree() {
     const nodeLimit = 500;
     const nodeWidth = 168;
-    const nodeHeight = 74;
+    const nodeHeight = 92;
     const columnGap = 220;
     const rowGap = 112;
     const svg = document.getElementById("lazyTreeSvg");
@@ -316,6 +409,11 @@
     }
 
     function addNode(member, column) {
+      if (member.spouses && member.spouses.length > 0) {
+        member.spouse_text = '配偶: ' + member.spouses.map(function (sp) { return sp.name; }).join('、');
+      } else {
+        member.spouse_text = '';
+      }
       if (nodes.has(member.id)) {
         var existing = nodes.get(member.id);
         var merged = Object.assign({}, existing, member);
@@ -429,15 +527,16 @@
         return '<g class="lazy-tree-node ' + genderClass + activeClass + '" transform="translate(' + pos.x + ', ' + pos.y + ')">'
           + '<rect width="' + nodeWidth + '" height="' + nodeHeight + '" rx="8"></rect>'
           + '<text class="lazy-tree-name" x="12" y="24">' + escapeText(node.name) + '</text>'
-          + '<text class="lazy-tree-meta" x="12" y="46">#' + node.id + ' · 第' + (node.generation_no || "") + '代</text>'
+          + '<text class="lazy-tree-meta" x="12" y="44">#' + node.id + ' · 第' + (node.generation_no || "") + '代</text>'
+          + '<text class="lazy-tree-spouse" x="12" y="62">' + (node.spouse_text || '') + '</text>'
           + '<a href="/members/' + node.id + '/relations" target="_blank">'
-          + '<g class="lazy-tree-action" transform="translate(86, 50)">'
+          + '<g class="lazy-tree-action" transform="translate(86, 68)">'
           + '<rect width="22" height="18" rx="4"></rect>'
           + '<text x="5" y="13">🔗</text>'
           + '</g></a>'
-          + '<g class="lazy-tree-action' + canExpandParents + '" data-action="parents" data-id="' + node.id + '" transform="translate(112, 50)">'
+          + '<g class="lazy-tree-action' + canExpandParents + '" data-action="parents" data-id="' + node.id + '" transform="translate(112, 68)">'
           + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">←</text></g>'
-          + '<g class="lazy-tree-action' + canExpandChildren + '" data-action="children" data-id="' + node.id + '" transform="translate(138, 50)">'
+          + '<g class="lazy-tree-action' + canExpandChildren + '" data-action="children" data-id="' + node.id + '" transform="translate(138, 68)">'
           + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">→</text></g>'
           + '</g>';
       }).join("");
@@ -468,9 +567,9 @@
     }
 
     async function focusMember() {
-      const memberId = Number(document.getElementById("focusMemberInput").value);
+      const memberId = Number(document.getElementById("focusMemberHidden").value);
       if (!memberId) {
-        setStatus("请输入有效的成员 ID。", "warning");
+        setStatus("请先搜索并选择一个成员。", "warning");
         return;
       }
       try {
@@ -531,10 +630,97 @@
     document.getElementById("loadRootsButton").addEventListener("click", loadRoots);
     document.getElementById("focusMemberButton").addEventListener("click", focusMember);
     document.getElementById("clearTreeButton").addEventListener("click", clearTree);
-    document.getElementById("focusMemberInput").addEventListener("keydown", function (event) {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        focusMember();
+
+    var searchInput = document.getElementById("focusMemberInput");
+    var searchHidden = document.getElementById("focusMemberHidden");
+    var searchDropdown = searchInput.parentElement.querySelector(".autocomplete-dropdown");
+    var searchTimer = null;
+    var searchItems = [];
+    var searchActive = -1;
+
+    function clearSearchDropdown() {
+      searchDropdown.innerHTML = '';
+      searchDropdown.classList.remove('show');
+      searchItems = [];
+      searchActive = -1;
+    }
+
+    function selectSearchItem(idx) {
+      if (idx < 0 || idx >= searchItems.length) return;
+      var m = searchItems[idx];
+      searchHidden.value = m.id;
+      searchInput.value = '#' + m.id + ' ' + m.name + ' (' + m.generation_no + '代)';
+      searchInput.dataset.selected = '1';
+      clearSearchDropdown();
+      focusMember();
+    }
+
+    function renderSearchItems(members) {
+      searchItems = members;
+      searchDropdown.innerHTML = '';
+      if (members.length === 0) {
+        searchDropdown.innerHTML = '<li class="autocomplete-empty">未找到匹配成员</li>';
+      } else {
+        members.forEach(function (m, i) {
+          var li = document.createElement('li');
+          var g = m.gender === 'male' ? '♂' : (m.gender === 'female' ? '♀' : '');
+          li.innerHTML = '<span class="ac-name">' + escapeText(m.name) + '</span>'
+            + ' <span class="ac-meta">#' + m.id + ' · ' + m.generation_no + '代</span>'
+            + (g ? ' <span class="ac-gender">' + g + '</span>' : '');
+          li.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            selectSearchItem(i);
+          });
+          searchDropdown.appendChild(li);
+        });
+      }
+      searchDropdown.classList.add('show');
+    }
+
+    function doSearch(q) {
+      if (!q) { clearSearchDropdown(); return; }
+      fetch('/genealogies/' + gid + '/members/search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(renderSearchItems)
+        .catch(function () { clearSearchDropdown(); });
+    }
+
+    searchInput.addEventListener('input', function () {
+      delete searchInput.dataset.selected;
+      searchHidden.value = '';
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { doSearch(searchInput.value.trim()); }, 280);
+    });
+
+    searchInput.addEventListener('focus', function () {
+      if (!searchInput.dataset.selected && searchInput.value.trim()) {
+        doSearch(searchInput.value.trim());
+      }
+    });
+
+    searchInput.addEventListener('keydown', function (e) {
+      var lis = searchDropdown.querySelectorAll('li:not(.autocomplete-empty)');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!searchDropdown.classList.contains('show')) { doSearch(searchInput.value.trim()); return; }
+        searchActive = Math.min(searchActive + 1, lis.length - 1);
+        lis.forEach(function (li, i) { li.classList.toggle('active', i === searchActive); });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        searchActive = Math.max(searchActive - 1, -1);
+        lis.forEach(function (li, i) { li.classList.toggle('active', i === searchActive); });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (searchActive >= 0) selectSearchItem(searchActive);
+        else focusMember();
+      } else if (e.key === 'Escape') {
+        clearSearchDropdown();
+      }
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!searchInput.parentElement.contains(e.target)) {
+        clearSearchDropdown();
       }
     });
 

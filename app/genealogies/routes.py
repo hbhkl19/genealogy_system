@@ -41,21 +41,19 @@ def update_genealogy_from_form(genealogy):
 
 
 def member_payload(member):
-    has_children = False
-    if member.gender != "female":
-        has_children = db.session.execute(
-            text(
-                """
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM parent_child_relations
-                    WHERE genealogy_id = :genealogy_id
-                      AND parent_member_id = :member_id
-                )
-                """
-            ),
-            {"genealogy_id": member.genealogy_id, "member_id": member.id},
-        ).scalar()
+    has_children = db.session.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM parent_child_relations
+                WHERE genealogy_id = :genealogy_id
+                  AND parent_member_id = :member_id
+            )
+            """
+        ),
+        {"genealogy_id": member.genealogy_id, "member_id": member.id},
+    ).scalar()
     has_parents = db.session.execute(
         text(
             """
@@ -64,6 +62,7 @@ def member_payload(member):
                 FROM parent_child_relations
                 WHERE genealogy_id = :genealogy_id
                   AND child_member_id = :member_id
+                  AND parent_role = 'father'
             )
             """
         ),
@@ -78,13 +77,13 @@ def member_payload(member):
         "generation_no": member.generation_no,
         "has_children": bool(has_children),
         "has_parents": bool(has_parents),
+        "spouses": indent_tree_spouses(member),
     }
 
 
 def indent_tree_spouses(member):
     marriages = (
-        Marriage.query.filter(Marriage.genealogy_id == member.genealogy_id)
-        .filter(
+        Marriage.query.filter(
             (Marriage.spouse1_member_id == member.id)
             | (Marriage.spouse2_member_id == member.id)
         )
@@ -102,7 +101,6 @@ def indent_tree_spouses(member):
     spouse_map = {
         spouse.id: spouse
         for spouse in Member.query.filter(
-            Member.genealogy_id == member.genealogy_id,
             Member.id.in_(spouse_ids),
         ).all()
     }
@@ -118,12 +116,10 @@ def indent_tree_spouses(member):
 
 
 def indent_member_payload(member):
-    has_children = False
-    if member.gender != "female":
-        has_children = ParentChildRelation.query.filter(
-            ParentChildRelation.genealogy_id == member.genealogy_id,
-            ParentChildRelation.parent_member_id == member.id,
-        ).first() is not None
+    has_children = ParentChildRelation.query.filter(
+        ParentChildRelation.genealogy_id == member.genealogy_id,
+        ParentChildRelation.parent_member_id == member.id,
+    ).first() is not None
     return {
         "id": member.id,
         "name": member.name,
@@ -296,14 +292,9 @@ def tree_roots(id):
         ParentChildRelation.child_member_id == Member.id,
         ParentChildRelation.parent_role == "father",
     ).exists()
-    has_marriage = Marriage.query.filter(
-        Marriage.genealogy_id == id,
-        (Marriage.spouse1_member_id == Member.id) | (Marriage.spouse2_member_id == Member.id),
-    ).exists()
     roots = (
         Member.query.filter(Member.genealogy_id == id)
         .filter(~has_father)
-        .filter((Member.gender == "male") | (~has_marriage))
         .order_by(Member.generation_no, Member.id)
         .all()
     )
@@ -315,12 +306,6 @@ def tree_roots(id):
 def tree_children(id, member_id):
     get_accessible_genealogy(id)
     member = get_genealogy_member_or_404(id, member_id)
-    if member.gender == "female":
-        return jsonify({
-            "member": {"id": member.id, "name": member.name, "gender": member.gender},
-            "spouses": indent_tree_spouses(member),
-            "children": [],
-        })
     children = (
         Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)
         .filter(
@@ -380,8 +365,6 @@ def svg_tree_node(id, member_id):
 def svg_tree_node_children(id, member_id):
     get_accessible_genealogy(id)
     member = get_genealogy_member_or_404(id, member_id)
-    if member.gender == "female":
-        return jsonify({"members": []})
     limit = min(request.args.get("limit", 100, type=int) or 100, 100)
     children = (
         Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)
@@ -406,6 +389,7 @@ def svg_tree_node_parents(id, member_id):
         .filter(
             ParentChildRelation.genealogy_id == id,
             ParentChildRelation.child_member_id == member_id,
+            ParentChildRelation.parent_role == "father",
         )
         .order_by(ParentChildRelation.parent_role, Member.id)
         .limit(2)
@@ -556,3 +540,33 @@ def export(id):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@bp.route("/<int:id>/members/search")
+@login_required
+def search_members(id):
+    get_accessible_genealogy(id)
+    query = (request.args.get("q", "") or "").strip()
+    exclude_id = request.args.get("exclude", type=int)
+    if not query:
+        return jsonify([])
+    limit = min(request.args.get("limit", 20, type=int) or 20, 50)
+    base = Member.query.filter(Member.genealogy_id == id)
+    if exclude_id:
+        base = base.filter(Member.id != exclude_id)
+    results = []
+    seen = set()
+    try:
+        mid = int(query)
+        exact = base.filter(Member.id == mid).first()
+        if exact:
+            results.append({"id": exact.id, "name": exact.name, "gender": exact.gender, "generation_no": exact.generation_no, "birth_year": exact.birth_year})
+            seen.add(exact.id)
+    except ValueError:
+        pass
+    fuzzy = base.filter(Member.name.ilike(f"%{query}%")).order_by(Member.name).limit(limit).all()
+    for m in fuzzy:
+        if m.id not in seen:
+            results.append({"id": m.id, "name": m.name, "gender": m.gender, "generation_no": m.generation_no, "birth_year": m.birth_year})
+            seen.add(m.id)
+    return jsonify(results[:limit])

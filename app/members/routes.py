@@ -249,7 +249,7 @@ def relations(id):
             add_marriage(genealogy_id, member.id, spouse_id)
         elif action == "delete_marriage":
             marriage_id = request.form.get("marriage_id", type=int)
-            marriage = Marriage.query.filter_by(id=marriage_id, genealogy_id=genealogy_id).first()
+            marriage = Marriage.query.filter_by(id=marriage_id).first()
             if marriage and member.id in {marriage.spouse1_member_id, marriage.spouse2_member_id}:
                 db.session.delete(marriage)
                 db.session.commit()
@@ -268,16 +268,9 @@ def relations(id):
     )
     marriages = (
         Marriage.query.filter(
-            Marriage.genealogy_id == genealogy_id,
             (Marriage.spouse1_member_id == member.id) | (Marriage.spouse2_member_id == member.id),
         )
         .order_by(Marriage.id)
-        .all()
-    )
-    candidates = (
-        Member.query.filter(Member.genealogy_id == genealogy_id, Member.id != member.id)
-        .order_by(Member.generation_no, Member.id)
-        .limit(500)
         .all()
     )
     return render_template(
@@ -286,7 +279,7 @@ def relations(id):
         parent_relations=parent_relations,
         child_relations=child_relations,
         marriages=marriages,
-        candidates=candidates,
+        genealogy_id=genealogy_id,
     )
 
 
@@ -358,10 +351,10 @@ EDGE_CTE_NO_REL = """
     FROM parent_child_relations WHERE genealogy_id = :genealogy_id
     UNION ALL
     SELECT spouse1_member_id, spouse2_member_id
-    FROM marriages WHERE genealogy_id = :genealogy_id
+    FROM marriages
     UNION ALL
     SELECT spouse2_member_id, spouse1_member_id
-    FROM marriages WHERE genealogy_id = :genealogy_id
+    FROM marriages
 """
 
 EDGE_CTE_WITH_REL = """
@@ -372,30 +365,15 @@ EDGE_CTE_WITH_REL = """
     FROM parent_child_relations WHERE genealogy_id = :genealogy_id
     UNION ALL
     SELECT spouse1_member_id, spouse2_member_id, 'spouse'
-    FROM marriages WHERE genealogy_id = :genealogy_id
+    FROM marriages
     UNION ALL
     SELECT spouse2_member_id, spouse1_member_id, 'spouse'
-    FROM marriages WHERE genealogy_id = :genealogy_id
+    FROM marriages
 """
 
 
 def _bfs_reachable(genealogy_id, root_id, max_depth):
-    """Phase 1: fast BFS returning {member_id: min_depth}.
-    Prefer stored PL/pgSQL function for deep searches (avoids CTE recursion overhead).
-    Falls back to UNION-based CTE if function is not deployed."""
-    if max_depth >= 8:
-        try:
-            rows = db.session.execute(
-                text(
-                    "SELECT member_id, depth FROM bfs_reachable("
-                    "CAST(:gid AS INTEGER), CAST(:rid AS INTEGER), CAST(:md AS INTEGER))"
-                ),
-                {"gid": genealogy_id, "rid": root_id, "md": max_depth},
-            ).fetchall()
-            return {r[0]: r[1] for r in rows}
-        except Exception:
-            db.session.rollback()
-
+    """Phase 1: fast BFS returning {member_id: min_depth} using UNION-based CTE."""
     sql = (
         "WITH RECURSIVE edges AS NOT MATERIALIZED ("
         + EDGE_CTE_NO_REL + "),\n"
@@ -431,10 +409,10 @@ def _sqlite_shortest_path(genealogy_id, start_id, end_id, max_depth=18):
             FROM parent_child_relations WHERE genealogy_id = :genealogy_id
             UNION ALL
             SELECT spouse1_member_id, spouse2_member_id, 'spouse'
-            FROM marriages WHERE genealogy_id = :genealogy_id
+            FROM marriages
             UNION ALL
             SELECT spouse2_member_id, spouse1_member_id, 'spouse'
-            FROM marriages WHERE genealogy_id = :genealogy_id
+            FROM marriages
             """
         ),
         {"genealogy_id": genealogy_id},
@@ -470,11 +448,11 @@ NEIGHBOR_QUERY = """
     UNION ALL
     SELECT spouse2_member_id
     FROM marriages
-    WHERE genealogy_id = :gid AND spouse1_member_id = :mid
+    WHERE spouse1_member_id = :mid
     UNION ALL
     SELECT spouse1_member_id
     FROM marriages
-    WHERE genealogy_id = :gid AND spouse2_member_id = :mid
+    WHERE spouse2_member_id = :mid
 """
 
 
@@ -573,8 +551,7 @@ def _lookup_relations_batch(genealogy_id, path_ids):
                               WHERE child_member_id=p.a AND parent_member_id=p.b
                               AND genealogy_id=:gid), 'parent')
                 WHEN EXISTS(SELECT 1 FROM marriages
-                            WHERE genealogy_id=:gid
-                            AND ((spouse1_member_id=p.a AND spouse2_member_id=p.b)
+                            WHERE ((spouse1_member_id=p.a AND spouse2_member_id=p.b)
                               OR (spouse1_member_id=p.b AND spouse2_member_id=p.a)))
                 THEN 'spouse'
             END AS relation
@@ -605,9 +582,6 @@ def relationship_path():
 
     member_a = get_member(member_a_id)
     member_b = get_member(member_b_id)
-    if member_a.genealogy_id != member_b.genealogy_id:
-        abort(404)
-
     gid = member_a.genealogy_id
     start_id = member_a.id
     end_id = member_b.id
