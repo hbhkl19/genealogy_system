@@ -199,6 +199,9 @@ def generate_dataset(
             all_gen_members.append(gen_members_list)
 
         total_members_written = 0
+        all_member_entries: list[dict] = []
+        connected_member_ids: set[int] = set()
+        marriage_pairs: set[tuple[int, int]] = set()
 
         for gi, gen_targets in enumerate(per_gen_targets):
             gid = gi + 1 + id_offset
@@ -224,7 +227,15 @@ def generate_dataset(
                     "death_year": death_year, "biography": biography,
                     "generation_no": 1,
                 })
+                member_entry = {
+                    "id": mid,
+                    "gid": gid,
+                    "gender": gender,
+                    "name": name,
+                    "generation_no": 1,
+                }
                 all_gen_members[gi][0].append({"id": mid, "gender": gender, "name": name})
+                all_member_entries.append(member_entry)
                 total_members_written += 1
 
         for gen_idx in range(generations - 1):
@@ -270,6 +281,8 @@ def generate_dataset(
                     "married_year": married_year,
                     "ended_year": "",
                 })
+                marriage_pairs.add((min(male["id"], female["id"]), max(male["id"], female["id"])))
+                connected_member_ids.update({male["id"], female["id"]})
                 counters.marriage_id += 1
 
             marriage_index: dict[int, list[dict]] = {}
@@ -325,6 +338,7 @@ def generate_dataset(
                             "child_member_id": mid,
                             "parent_role": "father",
                         })
+                        connected_member_ids.update({male["id"], mid})
                         counters.parent_child_id += 1
 
                         parent_child_writer.writerow({
@@ -334,12 +348,57 @@ def generate_dataset(
                             "child_member_id": mid,
                             "parent_role": "mother",
                         })
+                        connected_member_ids.update({female["id"], mid})
                         counters.parent_child_id += 1
 
+                        child_entry = {
+                            "id": mid, "gender": child_gender, "name": child_name,
+                            "gid": gid, "generation_no": child_gen,
+                        }
                         all_gen_members[gi][gen_idx + 1].append({
                             "id": mid, "gender": child_gender, "name": child_name,
                         })
+                        all_member_entries.append(child_entry)
                         total_members_written += 1
+
+        isolated_members = [
+            member for member in all_member_entries
+            if member["id"] not in connected_member_ids
+        ]
+        for member in isolated_members:
+            if member["id"] in connected_member_ids:
+                continue
+            candidates = [
+                candidate for candidate in all_member_entries
+                if candidate["id"] != member["id"]
+                and (min(member["id"], candidate["id"]), max(member["id"], candidate["id"])) not in marriage_pairs
+                and candidate["gid"] != member["gid"]
+            ]
+            if not candidates:
+                candidates = [
+                    candidate for candidate in all_member_entries
+                    if candidate["id"] != member["id"]
+                    and (min(member["id"], candidate["id"]), max(member["id"], candidate["id"])) not in marriage_pairs
+                ]
+            if not candidates:
+                continue
+            spouse = rng.choice(candidates)
+            pair = (min(member["id"], spouse["id"]), max(member["id"], spouse["id"]))
+            married_year = birth_year_for(
+                max(member.get("generation_no", 1), spouse.get("generation_no", 1)),
+                rng,
+            ) + rng.randint(22, 28)
+            marriages_writer.writerow({
+                "id": counters.marriage_id,
+                "genealogy_id": member["gid"],
+                "spouse1_member_id": pair[0],
+                "spouse2_member_id": pair[1],
+                "married_year": married_year,
+                "ended_year": "",
+            })
+            marriage_pairs.add(pair)
+            connected_member_ids.update({member["id"], spouse["id"]})
+            counters.marriage_id += 1
 
         return {
             "genealogies": num_genealogies,

@@ -17,10 +17,15 @@
     <p class="text-secondary mb-3" id="tree-info">点击 <strong>[+]</strong> 展开分支，按需加载</p>
 
     <div class="tree-toolbar mb-3">
+      <button class="btn btn-sm btn-outline-primary" type="button" onclick="loadIndentRoots()">回到初始预览</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">全部折叠</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(2)">展开到第 2 代</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(3)">展开到第 3 代</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="expandToDepth(5)">展开到第 5 代</button>
+      <div class="tree-id-search">
+        <input class="form-control form-control-sm" id="indentFocusMemberInput" type="number" min="1" placeholder="成员 ID">
+        <button class="btn btn-sm btn-outline-secondary" type="button" onclick="focusIndentMember()">定位</button>
+      </div>
     </div>
 
     <div class="tree-container" id="tree-container">
@@ -159,34 +164,33 @@
   }
 
   function expandToDepth(maxDepth) {
-    var roots = document.querySelectorAll('#tree-container > .tree-row');
-    expandNodesRecursive(roots, 0, maxDepth);
+    var container = document.getElementById('tree-container');
+    var rootRows = Array.from(container.querySelectorAll(':scope > .tree-row'));
+    if (rootRows.length === 0) {
+      document.getElementById('tree-info').innerHTML = '<span class="text-warning">当前没有可展开的根节点。</span>';
+      return;
+    }
+    var rootDepth = Math.min.apply(null, rootRows.map(function (row) {
+      return parseInt(row.dataset.depth || '0', 10);
+    }));
+    var targetDepth = rootDepth + maxDepth - 1;
+    document.getElementById('tree-info').innerHTML = '正在展开到第 ' + maxDepth + ' 代...';
+    expandVisibleTogglesUntil(targetDepth).then(function () {
+      document.getElementById('tree-info').innerHTML = '已展开到当前视图的第 ' + maxDepth + ' 代。';
+    });
   }
 
-  function expandNodesRecursive(rows, currentDepth, maxDepth) {
-    if (currentDepth >= maxDepth) return Promise.resolve();
-    var toggles = [];
-    rows.forEach(function (row) {
-      var tog = row.querySelector('.tree-toggle.collapsed:not(.leaf)');
-      if (tog) toggles.push(tog);
-    });
-    var promises = toggles.map(function (tog) {
-      var mid = tog.dataset.mid;
-      if (!tog.classList.contains('collapsed')) return Promise.resolve();
-      return loadChildrenPromise(tog, mid, parseInt(tog.dataset.depth));
-    });
-    return Promise.all(promises).then(function () {
-      var subPromises = [];
-      toggles.forEach(function (tog) {
-        var mid = tog.dataset.mid;
-        var container = document.getElementById('children-' + mid);
-        if (container) {
-          var childRows = container.querySelectorAll('.tree-row');
-          subPromises.push(expandNodesRecursive(childRows, currentDepth + 1, maxDepth));
-        }
-      });
-      return Promise.all(subPromises);
-    });
+  async function expandVisibleTogglesUntil(targetDepth) {
+    while (true) {
+      var toggles = Array.from(document.querySelectorAll('#tree-container .tree-toggle.collapsed:not(.leaf)'))
+        .filter(function (tog) {
+          return parseInt(tog.dataset.depth || '0', 10) < targetDepth;
+        });
+      if (toggles.length === 0) return;
+      await Promise.all(toggles.map(function (tog) {
+        return loadChildrenPromise(tog, tog.dataset.mid, parseInt(tog.dataset.depth || '0', 10));
+      }));
+    }
   }
 
   function loadChildrenPromise(toggleEl, mid, depth) {
@@ -209,29 +213,72 @@
     });
   }
 
-  fetch('/genealogies/' + gid + '/tree/roots')
-    .then(function (r) { return r.json(); })
-    .then(function (roots) {
-      var html = '';
-      var maleRoots = 0, femaleRoots = 0, withChildren = 0;
-      roots.forEach(function (root) {
-        html += buildNodeHtml(root, 0, root.has_children, root.spouses);
-        if (root.gender === 'male') maleRoots++; else femaleRoots++;
-        if (root.has_children) withChildren++;
+  function focusIndentMember() {
+    var input = document.getElementById('indentFocusMemberInput');
+    var mid = parseInt(input.value, 10);
+    if (!mid) {
+      document.getElementById('tree-info').innerHTML = '<span class="text-warning">请输入有效的成员 ID。</span>';
+      return;
+    }
+    document.getElementById('tree-info').innerHTML = '正在定位成员 #' + mid + '...';
+    fetch('/genealogies/' + gid + '/tree/member/' + mid)
+      .then(function (r) {
+        if (!r.ok) throw new Error('not found');
+        return r.json();
+      })
+      .then(function (member) {
+        document.getElementById('tree-container').innerHTML = buildNodeHtml(member, 0, member.has_children, member.spouses);
+        bindToggles(document.getElementById('tree-container'));
+        document.getElementById('tree-info').innerHTML = '已定位到 <strong>' + escapeHtml(member.name) + '</strong> #' + member.id + '，可点击 <strong>[+]</strong> 或使用“展开到第 N 代”展开该分支。';
+      })
+      .catch(function () {
+        document.getElementById('tree-info').innerHTML = '<span class="text-danger">定位失败：请确认成员 ID 属于当前族谱。</span>';
       });
-      document.getElementById('tree-container').innerHTML = html
-        || '<div class="tree-empty">暂无根节点（始祖）。</div>';
-      bindToggles();
+  }
 
-      var info = '共 <strong>' + roots.length + '</strong> 个始祖';
-      if (femaleRoots > 0) info += '（' + maleRoots + ' 男, ' + femaleRoots + ' 女）';
-      info += ', 其中 ' + withChildren + ' 人有后代。点击 <strong>[+]</strong> 展开分支。';
-      document.getElementById('tree-info').innerHTML = info;
-    })
-    .catch(function (err) {
-      document.getElementById('tree-container').innerHTML = '<div class="tree-empty">加载失败。</div>';
-      console.error(err);
-    });
+  document.addEventListener('DOMContentLoaded', function () {
+    var input = document.getElementById('indentFocusMemberInput');
+    if (input) {
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          focusIndentMember();
+        }
+      });
+    }
+  });
+
+  function loadIndentRoots() {
+    document.getElementById('indentFocusMemberInput').value = '';
+    document.getElementById('tree-info').innerHTML = '正在加载初始预览...';
+    document.getElementById('tree-container').innerHTML = '<div class="tree-loading">加载中...</div>';
+    fetch('/genealogies/' + gid + '/tree/roots')
+      .then(function (r) { return r.json(); })
+      .then(function (roots) {
+        var html = '';
+        var maleRoots = 0, femaleRoots = 0, withChildren = 0;
+        roots.forEach(function (root) {
+          html += buildNodeHtml(root, 0, root.has_children, root.spouses);
+          if (root.gender === 'male') maleRoots++; else femaleRoots++;
+          if (root.has_children) withChildren++;
+        });
+        document.getElementById('tree-container').innerHTML = html
+          || '<div class="tree-empty">暂无根节点（始祖）。</div>';
+        bindToggles(document.getElementById('tree-container'));
+
+        var info = '共 <strong>' + roots.length + '</strong> 个始祖';
+        if (femaleRoots > 0) info += '（' + maleRoots + ' 男, ' + femaleRoots + ' 女）';
+        info += ', 其中 ' + withChildren + ' 人有后代。点击 <strong>[+]</strong> 展开分支。';
+        document.getElementById('tree-info').innerHTML = info;
+      })
+      .catch(function (err) {
+        document.getElementById('tree-container').innerHTML = '<div class="tree-empty">加载失败。</div>';
+        document.getElementById('tree-info').innerHTML = '<span class="text-danger">初始预览加载失败。</span>';
+        console.error(err);
+      });
+  }
+
+  loadIndentRoots();
 
   function initSvgTree() {
     const nodeLimit = 500;

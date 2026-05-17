@@ -1,6 +1,6 @@
 from collections import deque
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
@@ -45,6 +45,30 @@ def get_genealogy_member(genealogy_id, member_id):
     if member is None or member.genealogy_id != genealogy_id:
         return None
     return member
+
+
+def ancestor_payload(member):
+    has_parents = db.session.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM parent_child_relations
+                WHERE child_member_id = :member_id
+            )
+            """
+        ),
+        {"member_id": member.id},
+    ).scalar()
+    return {
+        "id": member.id,
+        "name": member.name,
+        "gender": member.gender,
+        "birth_year": member.birth_year,
+        "death_year": member.death_year,
+        "generation_no": member.generation_no,
+        "has_parents": bool(has_parents),
+    }
 
 
 def validate_parent_child(genealogy_id, parent_id, child_id, parent_role):
@@ -270,24 +294,32 @@ def relations(id):
 @login_required
 def ancestors(id):
     member = get_member(id)
-    sql = """
-        WITH RECURSIVE ancestors AS (
-            SELECT p.parent_member_id AS member_id, 1 AS depth
-            FROM parent_child_relations p
-            WHERE p.child_member_id = :member_id
-            UNION
-            SELECT p.parent_member_id, a.depth + 1
-            FROM parent_child_relations p
-            JOIN ancestors a ON p.child_member_id = a.member_id
-            WHERE a.depth < 10
-        )
-        SELECT m.id, m.name, m.gender, m.generation_no, ancestors.depth
-        FROM ancestors
-        JOIN members m ON m.id = ancestors.member_id
-        ORDER BY ancestors.depth, m.id
-    """
-    rows = db.session.execute(text(sql), {"member_id": id}).mappings().all()
-    return render_template("members/ancestors.html", member=member, rows=rows)
+    parents = (
+        Member.query.join(ParentChildRelation, ParentChildRelation.parent_member_id == Member.id)
+        .filter(ParentChildRelation.child_member_id == member.id)
+        .order_by(ParentChildRelation.parent_role, Member.id)
+        .limit(2)
+        .all()
+    )
+    return render_template(
+        "members/ancestors.html",
+        member=member,
+        parents=[ancestor_payload(parent) for parent in parents],
+    )
+
+
+@bp.route("/members/<int:id>/ancestor-parents")
+@login_required
+def ancestor_parents(id):
+    member = get_member(id)
+    parents = (
+        Member.query.join(ParentChildRelation, ParentChildRelation.parent_member_id == Member.id)
+        .filter(ParentChildRelation.child_member_id == member.id)
+        .order_by(ParentChildRelation.parent_role, Member.id)
+        .limit(2)
+        .all()
+    )
+    return jsonify({"parents": [ancestor_payload(parent) for parent in parents]})
 
 
 @bp.route("/members/<int:id>/descendants")

@@ -8,6 +8,7 @@ from app.extensions import db
 from app.models import (
     Genealogy,
     GenealogyCollaborator,
+    Marriage,
     Member,
     ParentChildRelation,
     User,
@@ -75,6 +76,58 @@ def member_payload(member):
         "generation_no": member.generation_no,
         "has_children": bool(has_children),
         "has_parents": bool(has_parents),
+    }
+
+
+def indent_tree_spouses(member):
+    marriages = (
+        Marriage.query.filter(Marriage.genealogy_id == member.genealogy_id)
+        .filter(
+            (Marriage.spouse1_member_id == member.id)
+            | (Marriage.spouse2_member_id == member.id)
+        )
+        .order_by(Marriage.id)
+        .all()
+    )
+    spouse_ids = [
+        marriage.spouse2_member_id
+        if marriage.spouse1_member_id == member.id
+        else marriage.spouse1_member_id
+        for marriage in marriages
+    ]
+    if not spouse_ids:
+        return []
+    spouse_map = {
+        spouse.id: spouse
+        for spouse in Member.query.filter(
+            Member.genealogy_id == member.genealogy_id,
+            Member.id.in_(spouse_ids),
+        ).all()
+    }
+    return [
+        {
+            "id": spouse.id,
+            "name": spouse.name,
+            "gender": spouse.gender,
+        }
+        for spouse_id in spouse_ids
+        if (spouse := spouse_map.get(spouse_id)) is not None
+    ]
+
+
+def indent_member_payload(member):
+    has_children = ParentChildRelation.query.filter(
+        ParentChildRelation.genealogy_id == member.genealogy_id,
+        ParentChildRelation.parent_member_id == member.id,
+    ).first() is not None
+    return {
+        "id": member.id,
+        "name": member.name,
+        "gender": member.gender,
+        "generation_no": member.generation_no,
+        "birth_year": member.birth_year or 0,
+        "has_children": has_children,
+        "spouses": indent_tree_spouses(member),
     }
 
 
@@ -189,11 +242,38 @@ def invite(id):
 def members(id):
     genealogy = get_accessible_genealogy(id)
     q = request.args.get("q", "").strip()
+    member_id = request.args.get("member_id", type=int)
+    page = max(request.args.get("page", 1, type=int) or 1, 1)
+    per_page = request.args.get("per_page", 50, type=int) or 50
+    if per_page not in {50, 75}:
+        per_page = 50
     query = Member.query.filter_by(genealogy_id=id)
+    if member_id:
+        query = query.filter(Member.id == member_id)
     if q:
         query = query.filter(Member.name.ilike(f"%{q}%"))
-    members = query.order_by(Member.generation_no, Member.id).limit(200).all()
-    return render_template("genealogies/members.html", genealogy=genealogy, members=members, q=q)
+    total = query.count()
+    pages = max((total + per_page - 1) // per_page, 1)
+    page = min(page, pages)
+    members = (
+        query.order_by(Member.generation_no, Member.id)
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return render_template(
+        "genealogies/members.html",
+        genealogy=genealogy,
+        members=members,
+        q=q,
+        member_id=member_id,
+        page=page,
+        per_page=per_page,
+        total=total,
+        pages=pages,
+        start_page=max(1, page - 2),
+        end_page=min(pages, page + 2),
+    )
 
 
 @bp.route("/<int:id>/tree")
@@ -206,96 +286,55 @@ def tree(id):
 @bp.route("/<int:id>/tree/roots")
 @login_required
 def tree_roots(id):
-    genealogy = get_accessible_genealogy(id)
-    rows = db.session.execute(
-        text("""
-            SELECT m.id, m.name, m.gender, m.generation_no,
-                   COALESCE(m.birth_year, 0) AS birth_year,
-                   EXISTS(SELECT 1 FROM parent_child_relations p2
-                          WHERE p2.parent_member_id = m.id
-                            AND p2.genealogy_id = :gid) AS has_children,
-                   COALESCE(
-                       (SELECT json_agg(json_build_object('id', sp.id, 'name', sp.name))
-                        FROM marriages mar
-                        JOIN members sp ON sp.id =
-                            CASE WHEN mar.spouse1_member_id = m.id THEN mar.spouse2_member_id
-                                 ELSE mar.spouse1_member_id END
-                        WHERE (mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id)
-                       ), '[]'::json
-                   ) AS spouses
-            FROM members m
-            WHERE m.genealogy_id = :gid
-              AND NOT EXISTS (
-                  SELECT 1 FROM parent_child_relations p
-                  WHERE p.child_member_id = m.id
-                    AND p.genealogy_id = :gid
-                    AND p.parent_role = 'father'
-              )
-              AND (
-                  m.gender = 'male'
-                  OR NOT EXISTS (
-                      SELECT 1 FROM marriages mar
-                      WHERE mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id
-                  )
-              )
-            ORDER BY m.generation_no, m.id
-        """),
-        {"gid": id},
-    ).mappings().all()
-    return jsonify([dict(r) for r in rows])
+    get_accessible_genealogy(id)
+    has_father = ParentChildRelation.query.filter(
+        ParentChildRelation.genealogy_id == id,
+        ParentChildRelation.child_member_id == Member.id,
+        ParentChildRelation.parent_role == "father",
+    ).exists()
+    has_marriage = Marriage.query.filter(
+        Marriage.genealogy_id == id,
+        (Marriage.spouse1_member_id == Member.id) | (Marriage.spouse2_member_id == Member.id),
+    ).exists()
+    roots = (
+        Member.query.filter(Member.genealogy_id == id)
+        .filter(~has_father)
+        .filter((Member.gender == "male") | (~has_marriage))
+        .order_by(Member.generation_no, Member.id)
+        .all()
+    )
+    return jsonify([indent_member_payload(member) for member in roots])
 
 
 @bp.route("/<int:id>/tree/children/<int:member_id>")
 @login_required
 def tree_children(id, member_id):
-    genealogy = get_accessible_genealogy(id)
-    member = db.session.get(Member, member_id)
-    if not member or member.genealogy_id != id:
-        abort(404)
-
-    spouses = db.session.execute(
-        text("""
-            SELECT m.id, m.name, m.gender
-            FROM marriages mar
-            JOIN members m ON m.id =
-                CASE WHEN mar.spouse1_member_id = :mid THEN mar.spouse2_member_id
-                     ELSE mar.spouse1_member_id END
-            WHERE (mar.spouse1_member_id = :mid OR mar.spouse2_member_id = :mid)
-        """),
-        {"gid": id, "mid": member_id},
-    ).mappings().all()
-
-    children = db.session.execute(
-        text("""
-            SELECT m.id, m.name, m.gender, m.generation_no,
-                   COALESCE(m.birth_year, 0) AS birth_year,
-                   EXISTS(SELECT 1 FROM parent_child_relations p2
-                          WHERE p2.parent_member_id = m.id
-                            AND p2.genealogy_id = :gid
-                            AND p2.parent_role = 'father') AS has_children,
-                   COALESCE(
-                       (SELECT json_agg(json_build_object('id', sp.id, 'name', sp.name))
-                        FROM marriages mar
-                        JOIN members sp ON sp.id =
-                            CASE WHEN mar.spouse1_member_id = m.id THEN mar.spouse2_member_id
-                                 ELSE mar.spouse1_member_id END
-                        WHERE (mar.spouse1_member_id = m.id OR mar.spouse2_member_id = m.id)
-                       ), '[]'::json
-                   ) AS spouses
-            FROM parent_child_relations p
-            JOIN members m ON m.id = p.child_member_id
-            WHERE p.parent_member_id = :mid
-              AND p.genealogy_id = :gid
-            ORDER BY m.gender = 'male' DESC, m.birth_year, m.id
-        """),
-        {"gid": id, "mid": member_id},
-    ).mappings().all()
-
+    get_accessible_genealogy(id)
+    member = get_genealogy_member_or_404(id, member_id)
+    children = (
+        Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)
+        .filter(
+            ParentChildRelation.genealogy_id == id,
+            ParentChildRelation.parent_member_id == member_id,
+        )
+        .order_by(Member.birth_year, Member.id)
+        .all()
+    )
     return jsonify({
         "member": {"id": member.id, "name": member.name, "gender": member.gender},
-        "spouses": [dict(s) for s in spouses],
-        "children": [dict(c) for c in children],
+        "spouses": indent_tree_spouses(member),
+        "children": [indent_member_payload(child) for child in children],
     })
+
+
+@bp.route("/<int:id>/tree/member/<int:member_id>")
+@login_required
+def tree_member(id, member_id):
+    get_accessible_genealogy(id)
+    member = Member.query.filter_by(id=member_id, genealogy_id=id).first()
+    if member is None:
+        abort(404)
+    return jsonify(indent_member_payload(member))
 
 
 @bp.route("/<int:id>/tree-roots")

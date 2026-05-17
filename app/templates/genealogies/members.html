@@ -6,7 +6,14 @@
   <a class="btn btn-primary" href="{{ url_for('members.create', genealogy_id=genealogy.id) }}">添加成员</a>
 </div>
 <form class="row g-2 mb-3">
-  <div class="col-sm-9"><input class="form-control" name="q" value="{{ q }}" placeholder="按姓名模糊搜索"></div>
+  <div class="col-sm-5"><input class="form-control" name="q" value="{{ q }}" placeholder="按姓名模糊搜索"></div>
+  <div class="col-sm-2"><input class="form-control" name="member_id" type="number" min="1" value="{{ member_id or '' }}" placeholder="成员 ID"></div>
+  <div class="col-sm-2">
+    <select class="form-select" name="per_page">
+      <option value="50" {% if per_page == 50 %}selected{% endif %}>每页 50</option>
+      <option value="75" {% if per_page == 75 %}selected{% endif %}>每页 75</option>
+    </select>
+  </div>
   <div class="col-sm-3"><button class="btn btn-outline-secondary w-100" type="submit">搜索</button></div>
 </form>
 <form class="row g-2 mb-4" action="{{ url_for('members.relationship_path') }}">
@@ -14,6 +21,24 @@
   <div class="col-sm-5"><input class="form-control" name="b" type="number" min="1" placeholder="成员 B ID"></div>
   <div class="col-sm-2"><button class="btn btn-outline-secondary w-100" type="submit">亲缘链路</button></div>
 </form>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+  <div class="text-secondary small">共 {{ total }} 位成员，第 {{ page }} / {{ pages }} 页</div>
+  <nav aria-label="成员分页">
+    <ul class="pagination pagination-sm mb-0">
+      <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('genealogies.members', id=genealogy.id, q=q, member_id=member_id, per_page=per_page, page=page-1) }}">上一页</a>
+      </li>
+      {% for p in range(start_page, end_page + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for('genealogies.members', id=genealogy.id, q=q, member_id=member_id, per_page=per_page, page=p) }}">{{ p }}</a>
+        </li>
+      {% endfor %}
+      <li class="page-item {% if page >= pages %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('genealogies.members', id=genealogy.id, q=q, member_id=member_id, per_page=per_page, page=page+1) }}">下一页</a>
+      </li>
+    </ul>
+  </nav>
+</div>
 <div class="table-responsive">
   <table class="table align-middle">
     <thead><tr><th>ID</th><th>姓名</th><th>性别</th><th>生卒年</th><th>代数</th><th></th></tr></thead>

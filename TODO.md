@@ -1,5 +1,23 @@
 # TODO
 
+## 2026-05-18 树形预览与祖先查询修正记录
+
+- `[x]` 树形预览缩进树增加“回到初始预览”按钮，按成员 ID 定位后可以重新加载原始根成员预览。
+- `[x]` 修正缩进树“展开到第 2/3/5 代”：现在按当前视图根节点计算，定位到某个成员后也能继续批量展开其分支。
+- `[x]` 按用户反馈撤回独立的族谱级“祖先查询”入口，继续使用成员列表每行的“祖先”按钮进入 `/members/<id>/ancestors`。
+- `[x]` 成员列表与搜索增加“成员 ID”精确搜索，便于快速定位成员后进入祖先查询。
+- `[x]` 验证结果：`pytest` 14 passed，`compileall app scripts migrations` 通过，`flask --app app routes` 确认已移除 `/genealogies/<id>/ancestors`。
+
+## 2026-05-17 最终验收前功能补充记录
+
+- `[x]` 祖先查询改为懒加载：`/members/<id>/ancestors` 首屏只显示当前成员和直接父母，点击父母旁 `[+]` 再请求上一代。
+- `[x]` 新增祖先懒加载接口：`/members/<id>/ancestor-parents`，只返回指定成员的直接父母和 `has_parents` 标记。
+- `[x]` 成员列表增加分页：默认每页 50 条，可切换 75 条，并保留姓名搜索条件和页码跳转。
+- `[x]` 缩进树增加按成员 ID 定位：`/genealogies/<id>/tree/member/<member_id>` 返回局部根节点，前端可继续逐层展开后代。
+- `[x]` 缩进树 JSON 查询改为 SQLAlchemy 版本，避免测试环境和 PostgreSQL 方言差异影响验收。
+- `[x]` 数据生成脚本增加孤立成员补边逻辑，保证生成 CSV 中每个成员至少存在一条血缘或婚姻边。
+- `[x]` 验证结果：`pytest` 14 passed，`compileall app scripts migrations` 通过，`flask --app app routes` 可列出新增接口。
+
 本文件用于记录“寻根溯源”族谱管理系统的关键开发步骤、验收状态和每次开发进展。每次继续开发前先看本文件，开发后更新状态。
 
 ## 状态标记
