@@ -43,7 +43,7 @@
         </div>
         <button class="btn btn-outline-secondary" type="button" id="clearTreeButton">清空画布</button>
       </div>
-      <div class="lazy-tree-status" id="lazyTreeStatus">图形树不会一次性加载全族谱，请先加载根成员或输入成员 ID 定位。</div>
+      <div class="lazy-tree-status" id="lazyTreeStatus">图形树不会一次性加载全族谱，请先加载根成员或输入成员 ID 定位。定位后成员居中，左侧展开祖先，右侧展开后代。</div>
       <div class="lazy-tree-canvas" id="lazyTreeCanvas">
         <svg id="lazyTreeSvg" width="960" height="420" role="img" aria-label="懒加载图形族谱树"></svg>
       </div>
@@ -293,6 +293,7 @@
     const expandedChildren = new Set();
     const expandedParents = new Set();
     let activeNodeId = null;
+    let centeredMode = false;
 
     function setStatus(message, kind) {
       kind = kind || "info";
@@ -314,14 +315,22 @@
       return response.json();
     }
 
-    function addNode(member) {
+    function addNode(member, column) {
       if (nodes.has(member.id)) {
-        nodes.set(member.id, Object.assign({}, nodes.get(member.id), member));
+        var existing = nodes.get(member.id);
+        var merged = Object.assign({}, existing, member);
+        if (typeof column === "number") {
+          merged._column = column;
+        }
+        nodes.set(member.id, merged);
         return false;
       }
       if (nodes.size >= nodeLimit) {
         setStatus("当前可视节点已达到 500 个，请清空画布后通过成员 ID 定位继续查看。", "warning");
         return false;
+      }
+      if (typeof column === "number") {
+        member._column = column;
       }
       nodes.set(member.id, member);
       return true;
@@ -339,6 +348,7 @@
       expandedChildren.clear();
       expandedParents.clear();
       activeNodeId = null;
+      centeredMode = false;
       draw();
       setStatus("画布已清空。");
     }
@@ -346,11 +356,11 @@
     function groupedNodes() {
       const groups = new Map();
       for (const node of nodes.values()) {
-        const generation = node.generation_no || 1;
-        if (!groups.has(generation)) {
-          groups.set(generation, []);
+        const column = typeof node._column === "number" ? node._column : (node.generation_no || 1);
+        if (!groups.has(column)) {
+          groups.set(column, []);
         }
-        groups.get(generation).push(node);
+        groups.get(column).push(node);
       }
       return Array.from(groups.entries())
         .sort(function (a, b) { return a[0] - b[0]; })
@@ -362,20 +372,34 @@
     function layoutNodes() {
       const positions = new Map();
       const groups = groupedNodes();
+      const centerX = 396;
+      var minX = Infinity;
+      var maxX = 0;
       groups.forEach(function (pair) {
-        var generation = pair[0];
+        var column = pair[0];
         var members = pair[1];
-        var columnIndex = groups.findIndex(function (g) { return g[0] === generation; });
+        var columnIndex = groups.findIndex(function (g) { return g[0] === column; });
         members.forEach(function (member, rowIndex) {
+          var x = centeredMode ? centerX + column * columnGap : 28 + columnIndex * columnGap;
+          var y = 28 + rowIndex * rowGap;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x + nodeWidth);
           positions.set(member.id, {
-            x: 28 + columnIndex * columnGap,
-            y: 28 + rowIndex * rowGap,
-            generation: generation,
+            x: x,
+            y: y,
+            column: column,
           });
         });
       });
+      if (centeredMode && minX < 28) {
+        var shiftX = 28 - minX;
+        positions.forEach(function (pos) {
+          pos.x += shiftX;
+        });
+        maxX += shiftX;
+      }
       const maxRows = Math.max.apply(null, [1].concat(groups.map(function (pair) { return pair[1].length; })));
-      svg.setAttribute("width", Math.max(960, 72 + groups.length * columnGap));
+      svg.setAttribute("width", Math.max(960, maxX + 56));
       svg.setAttribute("height", Math.max(420, 80 + maxRows * rowGap));
       return positions;
     }
@@ -412,9 +436,9 @@
           + '<text x="5" y="13">🔗</text>'
           + '</g></a>'
           + '<g class="lazy-tree-action' + canExpandParents + '" data-action="parents" data-id="' + node.id + '" transform="translate(112, 50)">'
-          + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">↑</text></g>'
+          + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">←</text></g>'
           + '<g class="lazy-tree-action' + canExpandChildren + '" data-action="children" data-id="' + node.id + '" transform="translate(138, 50)">'
-          + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">↓</text></g>'
+          + '<rect width="22" height="18" rx="4"></rect><text x="7" y="13">→</text></g>'
           + '</g>';
       }).join("");
 
@@ -425,7 +449,14 @@
       try {
         setStatus("正在加载根成员...");
         const data = await getJson("/genealogies/" + gid + "/tree-roots");
-        data.members.forEach(addNode);
+        nodes.clear();
+        edges.clear();
+        expandedChildren.clear();
+        expandedParents.clear();
+        centeredMode = false;
+        data.members.forEach(function (member) {
+          addNode(member);
+        });
         activeNodeId = data.members[0] ? data.members[0].id : null;
         draw();
         var msg = "已加载 " + data.members.length + " 个根成员";
@@ -445,10 +476,15 @@
       try {
         setStatus("正在定位成员...");
         const data = await getJson("/genealogies/" + gid + "/tree-node/" + memberId);
-        addNode(data.member);
+        nodes.clear();
+        edges.clear();
+        expandedChildren.clear();
+        expandedParents.clear();
+        centeredMode = true;
+        addNode(data.member, 0);
         activeNodeId = data.member.id;
         draw();
-        setStatus("已定位到 " + data.member.name + " #" + data.member.id + "，可继续向上或向下展开。");
+        setStatus("已定位到 " + data.member.name + " #" + data.member.id + "。左箭头加载父母祖先，右箭头加载子女后代。");
       } catch (error) {
         setStatus("成员定位失败：请确认该 ID 属于当前族谱。", "danger");
       }
@@ -464,8 +500,13 @@
         activeNodeId = memberId;
         setStatus("正在加载相邻成员...");
         const data = await getJson("/genealogies/" + gid + "/tree-node/" + memberId + "/" + direction);
+        const currentNode = nodes.get(memberId);
+        const currentColumn = currentNode && typeof currentNode._column === "number"
+          ? currentNode._column
+          : (currentNode ? currentNode.generation_no || 1 : 0);
+        const nextColumn = direction === "children" ? currentColumn + 1 : currentColumn - 1;
         data.members.forEach(function (member) {
-          addNode(member);
+          addNode(member, centeredMode ? nextColumn : undefined);
           if (direction === "children") {
             addEdge(memberId, member.id);
           } else {
