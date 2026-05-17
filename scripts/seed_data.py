@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from faker import Faker
+from werkzeug.security import generate_password_hash
 
 
 DEFAULT_SIZES = [50000] + [6000] * 9
@@ -174,7 +175,7 @@ def generate_dataset(
         if not skip_users:
             users_writer.writerow({
                 "id": 1, "username": "demo", "email": "demo@example.com",
-                "password_hash": "pbkdf2:sha256:1000000$demo$replace-after-import",
+                "password_hash": generate_password_hash("demo123456"),
             })
 
         for gi in range(num_genealogies):

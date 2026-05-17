@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 from pathlib import Path
 
@@ -155,8 +156,18 @@ def refresh_relationship_triggers(cursor) -> None:
     print("refreshed relationship integrity triggers")
 
 
+def csv_header(csv_path: Path) -> list[str]:
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle)
+        return next(reader)
+
+
 def copy_file(cursor, table: str, columns: list[str], csv_path: Path) -> None:
-    column_sql = ", ".join(columns)
+    header = csv_header(csv_path)
+    unknown_columns = [column for column in header if column not in columns]
+    if unknown_columns:
+        raise ValueError(f"{csv_path} contains unsupported columns for {table}: {unknown_columns}")
+    column_sql = ", ".join(header)
     with cursor.copy(f"COPY {table} ({column_sql}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE)") as copy:
         with csv_path.open("r", encoding="utf-8", newline="") as handle:
             while chunk := handle.read(1024 * 1024):

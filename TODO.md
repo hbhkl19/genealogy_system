@@ -4,6 +4,8 @@
 
 - `[x]` 重写数据生成规则：族谱成员表内同姓；配偶来自其他族谱；每个人只属于自己的姓氏族谱；子女随父姓。
 - `[x]` `seed_data.py` 生成的 `genealogies.csv` 已补齐 `surname` 和 `revision_year` 字段，和 `import_csv.py` 的 COPY 字段一致。
+- `[x]` `seed_data.py` 现在为 `demo@example.com` 生成真实密码哈希，重新导入后可使用 `demo123456` 登录。
+- `[x]` `import_csv.py` 现在按 CSV 表头执行 COPY，可兼容旧版 4 列 `genealogies.csv` 和新版 6 列 `genealogies.csv`。
 - `[x]` `import_csv.py` 导入前会刷新关系触发器，允许母亲跨族谱、要求父亲同族谱、要求配偶来自不同族谱，避免旧数据库触发器阻塞导入。
 - `[x]` 树形预览规则调整：女性节点不向下展开，妻子/母亲仍通过配偶或父母关系显示。
 - `[x]` 已重新生成 `data/generated`：10 个族谱、104000 成员、最大单族谱 50000、最大代数 30、孤立成员 0、婚姻全部跨族谱。
