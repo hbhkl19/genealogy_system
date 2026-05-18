@@ -365,6 +365,8 @@ def svg_tree_node(id, member_id):
 def svg_tree_node_children(id, member_id):
     get_accessible_genealogy(id)
     member = get_genealogy_member_or_404(id, member_id)
+    if member.gender == "female":
+        return jsonify({"members": []})
     limit = min(request.args.get("limit", 100, type=int) or 100, 100)
     children = (
         Member.query.join(ParentChildRelation, ParentChildRelation.child_member_id == Member.id)
@@ -389,7 +391,6 @@ def svg_tree_node_parents(id, member_id):
         .filter(
             ParentChildRelation.genealogy_id == id,
             ParentChildRelation.child_member_id == member_id,
-            ParentChildRelation.parent_role == "father",
         )
         .order_by(ParentChildRelation.parent_role, Member.id)
         .limit(2)

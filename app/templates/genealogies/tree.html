@@ -93,6 +93,8 @@
     let toggleHtml = '';
     if (hasChildren) {
       toggleHtml = '<span class="tree-toggle collapsed" data-mid="' + member.id + '" data-depth="' + depth + '" title="展开子女">[+]</span>';
+    } else if (depth === 0) {
+      toggleHtml = '';
     } else {
       toggleHtml = '<span class="tree-toggle leaf"></span>';
     }
