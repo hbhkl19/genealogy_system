@@ -207,6 +207,37 @@ def test_recursive_views_render_relationships(app, client):
     assert "配偶".encode() in path.data
 
 
+def test_relationship_path_can_cross_accessible_genealogies(app, client):
+    with app.app_context():
+        user = User(username="cross", email="cross@example.com")
+        user.set_password("secret")
+        genealogy_a = Genealogy(name="赵氏族谱", owner=user)
+        genealogy_b = Genealogy(name="王氏族谱", owner=user)
+        husband = Member(name="赵甲", gender="male", generation_no=1, genealogy=genealogy_a)
+        wife = Member(name="王乙", gender="female", generation_no=1, genealogy=genealogy_b)
+        db.session.add_all([user, genealogy_a, genealogy_b, husband, wife])
+        db.session.flush()
+        db.session.add(
+            Marriage(
+                genealogy_id=genealogy_a.id,
+                spouse1_member_id=min(husband.id, wife.id),
+                spouse2_member_id=max(husband.id, wife.id),
+                married_year=1990,
+            )
+        )
+        db.session.commit()
+        husband_id = husband.id
+        wife_id = wife.id
+
+    client.post("/login", data={"account": "cross", "password": "secret"})
+    path = client.get(f"/relationship/path?a={husband_id}&b={wife_id}")
+
+    assert path.status_code == 200
+    assert "赵甲".encode() in path.data
+    assert "王乙".encode() in path.data
+    assert "配偶".encode() in path.data
+
+
 def test_lazy_tree_json_endpoints(app, client):
     with app.app_context():
         ids = seed_user_genealogy_members()

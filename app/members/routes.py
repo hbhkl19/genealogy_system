@@ -344,35 +344,79 @@ def descendants(id):
 
 
 EDGE_CTE_NO_REL = """
-    SELECT parent_member_id AS from_id, child_member_id AS to_id
-    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    SELECT p.parent_member_id AS from_id, p.child_member_id AS to_id
+    FROM parent_child_relations p
+    JOIN members parent_member ON parent_member.id = p.parent_member_id
+    JOIN members child_member ON child_member.id = p.child_member_id
+    WHERE p.genealogy_id = ANY(:genealogy_ids)
+      AND parent_member.genealogy_id = ANY(:genealogy_ids)
+      AND child_member.genealogy_id = ANY(:genealogy_ids)
     UNION ALL
-    SELECT child_member_id, parent_member_id
-    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    SELECT p.child_member_id, p.parent_member_id
+    FROM parent_child_relations p
+    JOIN members parent_member ON parent_member.id = p.parent_member_id
+    JOIN members child_member ON child_member.id = p.child_member_id
+    WHERE p.genealogy_id = ANY(:genealogy_ids)
+      AND parent_member.genealogy_id = ANY(:genealogy_ids)
+      AND child_member.genealogy_id = ANY(:genealogy_ids)
     UNION ALL
-    SELECT spouse1_member_id, spouse2_member_id
-    FROM marriages
+    SELECT m.spouse1_member_id, m.spouse2_member_id
+    FROM marriages m
+    JOIN members spouse1 ON spouse1.id = m.spouse1_member_id
+    JOIN members spouse2 ON spouse2.id = m.spouse2_member_id
+    WHERE m.genealogy_id = ANY(:genealogy_ids)
+      AND spouse1.genealogy_id = ANY(:genealogy_ids)
+      AND spouse2.genealogy_id = ANY(:genealogy_ids)
     UNION ALL
-    SELECT spouse2_member_id, spouse1_member_id
-    FROM marriages
+    SELECT m.spouse2_member_id, m.spouse1_member_id
+    FROM marriages m
+    JOIN members spouse1 ON spouse1.id = m.spouse1_member_id
+    JOIN members spouse2 ON spouse2.id = m.spouse2_member_id
+    WHERE m.genealogy_id = ANY(:genealogy_ids)
+      AND spouse1.genealogy_id = ANY(:genealogy_ids)
+      AND spouse2.genealogy_id = ANY(:genealogy_ids)
 """
 
 EDGE_CTE_WITH_REL = """
-    SELECT parent_member_id AS from_id, child_member_id AS to_id, 'child' AS relation_type
-    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    SELECT p.parent_member_id AS from_id, p.child_member_id AS to_id, 'child' AS relation_type
+    FROM parent_child_relations p
+    JOIN members parent_member ON parent_member.id = p.parent_member_id
+    JOIN members child_member ON child_member.id = p.child_member_id
+    WHERE p.genealogy_id = ANY(:genealogy_ids)
+      AND parent_member.genealogy_id = ANY(:genealogy_ids)
+      AND child_member.genealogy_id = ANY(:genealogy_ids)
     UNION ALL
-    SELECT child_member_id, parent_member_id, parent_role
-    FROM parent_child_relations WHERE genealogy_id = :genealogy_id
+    SELECT p.child_member_id, p.parent_member_id, p.parent_role
+    FROM parent_child_relations p
+    JOIN members parent_member ON parent_member.id = p.parent_member_id
+    JOIN members child_member ON child_member.id = p.child_member_id
+    WHERE p.genealogy_id = ANY(:genealogy_ids)
+      AND parent_member.genealogy_id = ANY(:genealogy_ids)
+      AND child_member.genealogy_id = ANY(:genealogy_ids)
     UNION ALL
-    SELECT spouse1_member_id, spouse2_member_id, 'spouse'
-    FROM marriages
+    SELECT m.spouse1_member_id, m.spouse2_member_id, 'spouse'
+    FROM marriages m
+    JOIN members spouse1 ON spouse1.id = m.spouse1_member_id
+    JOIN members spouse2 ON spouse2.id = m.spouse2_member_id
+    WHERE m.genealogy_id = ANY(:genealogy_ids)
+      AND spouse1.genealogy_id = ANY(:genealogy_ids)
+      AND spouse2.genealogy_id = ANY(:genealogy_ids)
     UNION ALL
-    SELECT spouse2_member_id, spouse1_member_id, 'spouse'
-    FROM marriages
+    SELECT m.spouse2_member_id, m.spouse1_member_id, 'spouse'
+    FROM marriages m
+    JOIN members spouse1 ON spouse1.id = m.spouse1_member_id
+    JOIN members spouse2 ON spouse2.id = m.spouse2_member_id
+    WHERE m.genealogy_id = ANY(:genealogy_ids)
+      AND spouse1.genealogy_id = ANY(:genealogy_ids)
+      AND spouse2.genealogy_id = ANY(:genealogy_ids)
 """
 
 
-def _bfs_reachable(genealogy_id, root_id, max_depth):
+def accessible_genealogy_ids():
+    return [row.id for row in accessible_genealogy_query(current_user).with_entities(Genealogy.id).all()]
+
+
+def _bfs_reachable(genealogy_ids, root_id, max_depth):
     """Phase 1: fast BFS returning {member_id: min_depth} using UNION-based CTE."""
     sql = (
         "WITH RECURSIVE edges AS NOT MATERIALIZED ("
@@ -388,7 +432,7 @@ def _bfs_reachable(genealogy_id, root_id, max_depth):
     )
     rows = db.session.execute(
         text(sql),
-        {"genealogy_id": genealogy_id, "root_id": root_id, "max_depth": max_depth},
+        {"genealogy_ids": genealogy_ids, "root_id": root_id, "max_depth": max_depth},
     ).fetchall()
     return {r[0]: r[1] for r in rows}
 
@@ -397,29 +441,28 @@ def _is_sqlite():
     return db.session.get_bind().dialect.name == "sqlite"
 
 
-def _sqlite_shortest_path(genealogy_id, start_id, end_id, max_depth=18):
+def _sqlite_shortest_path(genealogy_ids, start_id, end_id, max_depth=18):
     """SQLite test fallback for the PostgreSQL-optimized kinship search."""
-    rows = db.session.execute(
-        text(
-            """
-            SELECT parent_member_id AS from_id, child_member_id AS to_id, 'child' AS relation_type
-            FROM parent_child_relations WHERE genealogy_id = :genealogy_id
-            UNION ALL
-            SELECT child_member_id, parent_member_id, parent_role
-            FROM parent_child_relations WHERE genealogy_id = :genealogy_id
-            UNION ALL
-            SELECT spouse1_member_id, spouse2_member_id, 'spouse'
-            FROM marriages
-            UNION ALL
-            SELECT spouse2_member_id, spouse1_member_id, 'spouse'
-            FROM marriages
-            """
-        ),
-        {"genealogy_id": genealogy_id},
-    ).mappings().all()
     graph = {}
-    for row in rows:
-        graph.setdefault(row["from_id"], []).append((row["to_id"], row["relation_type"]))
+    parent_child_rows = ParentChildRelation.query.filter(
+        ParentChildRelation.genealogy_id.in_(genealogy_ids)
+    ).all()
+    for row in parent_child_rows:
+        parent = db.session.get(Member, row.parent_member_id)
+        child = db.session.get(Member, row.child_member_id)
+        if parent.genealogy_id not in genealogy_ids or child.genealogy_id not in genealogy_ids:
+            continue
+        graph.setdefault(row.parent_member_id, []).append((row.child_member_id, "child"))
+        graph.setdefault(row.child_member_id, []).append((row.parent_member_id, row.parent_role))
+
+    marriage_rows = Marriage.query.filter(Marriage.genealogy_id.in_(genealogy_ids)).all()
+    for row in marriage_rows:
+        spouse1 = db.session.get(Member, row.spouse1_member_id)
+        spouse2 = db.session.get(Member, row.spouse2_member_id)
+        if spouse1.genealogy_id not in genealogy_ids or spouse2.genealogy_id not in genealogy_ids:
+            continue
+        graph.setdefault(row.spouse1_member_id, []).append((row.spouse2_member_id, "spouse"))
+        graph.setdefault(row.spouse2_member_id, []).append((row.spouse1_member_id, "spouse"))
 
     queue = deque([(start_id, [start_id], [])])
     visited = {start_id}
@@ -440,23 +483,23 @@ def _sqlite_shortest_path(genealogy_id, start_id, end_id, max_depth=18):
 NEIGHBOR_QUERY = """
     SELECT parent_member_id AS nid
     FROM parent_child_relations
-    WHERE genealogy_id = :gid AND child_member_id = :mid
+    WHERE genealogy_id = ANY(:gids) AND child_member_id = :mid
     UNION ALL
     SELECT child_member_id
     FROM parent_child_relations
-    WHERE genealogy_id = :gid AND parent_member_id = :mid
+    WHERE genealogy_id = ANY(:gids) AND parent_member_id = :mid
     UNION ALL
     SELECT spouse2_member_id
     FROM marriages
-    WHERE spouse1_member_id = :mid
+    WHERE genealogy_id = ANY(:gids) AND spouse1_member_id = :mid
     UNION ALL
     SELECT spouse1_member_id
     FROM marriages
-    WHERE spouse2_member_id = :mid
+    WHERE genealogy_id = ANY(:gids) AND spouse2_member_id = :mid
 """
 
 
-def _reconstruct_path(genealogy_id, start_id, meeting_id, depth, distances):
+def _reconstruct_path(genealogy_ids, start_id, meeting_id, depth, distances):
     """Phase 2: backtrack from meeting_id to start_id using distances map.
     Does per-step neighbor queries (O(depth) queries, each < 5ms).
     Returns (path_ids_list, relation_labels_list)."""
@@ -474,18 +517,18 @@ def _reconstruct_path(genealogy_id, start_id, meeting_id, depth, distances):
                 "SELECT nid FROM (" + NEIGHBOR_QUERY + ") neighbors"
                 " WHERE nid = ANY(:candidates) LIMIT 1"
             ),
-            {"gid": genealogy_id, "mid": current, "candidates": candidates},
+            {"gids": genealogy_ids, "mid": current, "candidates": candidates},
         ).first()
         if not row:
             return None, None
         path_ids.insert(0, row[0])
         current = row[0]
 
-    relations = _lookup_relations_batch(genealogy_id, path_ids)
+    relations = _lookup_relations_batch(genealogy_ids, path_ids)
     return path_ids, relations
 
 
-def _reconstruct_path_sql(genealogy_id, start_id, meeting_id, depth):
+def _reconstruct_path_sql(genealogy_ids, start_id, meeting_id, depth):
     """Fallback Phase 2: SQL-based path reconstruction for deep paths (>6).
     Uses UNION ALL walk with ARRAY path tracking, bounded to known depth."""
     sql = (
@@ -511,7 +554,7 @@ def _reconstruct_path_sql(genealogy_id, start_id, meeting_id, depth):
     row = db.session.execute(
         text(sql),
         {
-            "genealogy_id": genealogy_id,
+            "genealogy_ids": genealogy_ids,
             "start_id": start_id,
             "target_id": meeting_id,
             "max_depth": depth + 1,
@@ -522,18 +565,17 @@ def _reconstruct_path_sql(genealogy_id, start_id, meeting_id, depth):
     return list(row.path), list(row.rels)
 
 
-def _lookup_relations_batch(genealogy_id, path_ids):
+def _lookup_relations_batch(genealogy_ids, path_ids):
     """Batch-lookup relation labels between consecutive members in path.
     Uses a single VALUES-based query instead of O(n) individual queries."""
     if len(path_ids) < 2:
         return []
     n = len(path_ids) - 1
-    gid = genealogy_id
 
     values_clause = ", ".join(
         f"({i}, CAST(:a{i} AS INTEGER), CAST(:b{i} AS INTEGER))" for i in range(n)
     )
-    params = {"gid": gid}
+    params = {"gids": genealogy_ids}
     for i in range(n):
         params[f"a{i}"] = path_ids[i]
         params[f"b{i}"] = path_ids[i + 1]
@@ -541,20 +583,21 @@ def _lookup_relations_batch(genealogy_id, path_ids):
     sql = f"""
         SELECT p.idx, p.a, p.b,
             CASE
-                WHEN EXISTS(SELECT 1 FROM parent_child_relations
-                            WHERE parent_member_id=p.a AND child_member_id=p.b
-                            AND genealogy_id=:gid) THEN 'child'
-                WHEN EXISTS(SELECT 1 FROM parent_child_relations
-                            WHERE child_member_id=p.a AND parent_member_id=p.b
-                            AND genealogy_id=:gid) THEN
-                    COALESCE((SELECT parent_role FROM parent_child_relations
+                  WHEN EXISTS(SELECT 1 FROM parent_child_relations
+                              WHERE parent_member_id=p.a AND child_member_id=p.b
+                              AND genealogy_id=ANY(:gids)) THEN 'child'
+                  WHEN EXISTS(SELECT 1 FROM parent_child_relations
                               WHERE child_member_id=p.a AND parent_member_id=p.b
-                              AND genealogy_id=:gid), 'parent')
-                WHEN EXISTS(SELECT 1 FROM marriages
-                            WHERE ((spouse1_member_id=p.a AND spouse2_member_id=p.b)
-                              OR (spouse1_member_id=p.b AND spouse2_member_id=p.a)))
-                THEN 'spouse'
-            END AS relation
+                              AND genealogy_id=ANY(:gids)) THEN
+                      COALESCE((SELECT parent_role FROM parent_child_relations
+                                WHERE child_member_id=p.a AND parent_member_id=p.b
+                                AND genealogy_id=ANY(:gids)), 'parent')
+                  WHEN EXISTS(SELECT 1 FROM marriages
+                              WHERE ((spouse1_member_id=p.a AND spouse2_member_id=p.b)
+                                OR (spouse1_member_id=p.b AND spouse2_member_id=p.a))
+                                AND genealogy_id=ANY(:gids))
+                  THEN 'spouse'
+              END AS relation
         FROM (VALUES {values_clause}) AS p(idx, a, b)
         ORDER BY p.idx
     """
@@ -582,7 +625,7 @@ def relationship_path():
 
     member_a = get_member(member_a_id)
     member_b = get_member(member_b_id)
-    gid = member_a.genealogy_id
+    genealogy_ids = accessible_genealogy_ids()
     start_id = member_a.id
     end_id = member_b.id
 
@@ -600,13 +643,13 @@ def relationship_path():
 
     use_sqlite_fallback = _is_sqlite()
     if use_sqlite_fallback:
-        full_path_ids, relation_types = _sqlite_shortest_path(gid, start_id, end_id)
+        full_path_ids, relation_types = _sqlite_shortest_path(genealogy_ids, start_id, end_id)
 
     # --- Progressive bidirectional BFS ---
     # Try shallow depths first (fast for common close relations)
     for max_depth in (() if use_sqlite_fallback else (6, 8, 10, 12, 15)):
-        fwd = _bfs_reachable(gid, start_id, max_depth)
-        rev = _bfs_reachable(gid, end_id, max_depth)
+        fwd = _bfs_reachable(genealogy_ids, start_id, max_depth)
+        rev = _bfs_reachable(genealogy_ids, end_id, max_depth)
         meeting = set(fwd.keys()) & set(rev.keys())
 
         if meeting:
@@ -616,8 +659,8 @@ def relationship_path():
 
             # --- Phase 2: reconstruct both halves ---
             # Python backtracking: O(depth) per-step queries (each < 5ms with indexes)
-            fwd_ids, fwd_rels = _reconstruct_path(gid, start_id, best, fwd_depth, fwd)
-            rev_ids, rev_rels = _reconstruct_path(gid, end_id, best, rev_depth, rev)
+            fwd_ids, fwd_rels = _reconstruct_path(genealogy_ids, start_id, best, fwd_depth, fwd)
+            rev_ids, rev_rels = _reconstruct_path(genealogy_ids, end_id, best, rev_depth, rev)
 
             if fwd_ids and rev_ids:
                 fwd_ids = list(fwd_ids)
@@ -666,7 +709,7 @@ def relationship_path():
         )
         row = db.session.execute(
             text(legacy_sql),
-            {"genealogy_id": gid, "start_id": start_id, "end_id": end_id},
+            {"genealogy_ids": genealogy_ids, "start_id": start_id, "end_id": end_id},
         ).first()
         if row:
             full_path_ids = [int(v) for v in row.id_path.strip(",").split(",") if v]
