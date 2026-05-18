@@ -499,6 +499,121 @@ NEIGHBOR_QUERY = """
 """
 
 
+NEIGHBORS_FOR_FRONTIER_QUERY = """
+    SELECT p.child_member_id AS from_id, p.parent_member_id AS to_id, p.parent_role AS relation_type
+    FROM parent_child_relations p
+    JOIN members parent_member ON parent_member.id = p.parent_member_id
+    WHERE p.genealogy_id = ANY(:gids)
+      AND p.child_member_id = ANY(:frontier)
+      AND parent_member.genealogy_id = ANY(:gids)
+    UNION ALL
+    SELECT p.parent_member_id, p.child_member_id, 'child'
+    FROM parent_child_relations p
+    JOIN members child_member ON child_member.id = p.child_member_id
+    WHERE p.genealogy_id = ANY(:gids)
+      AND p.parent_member_id = ANY(:frontier)
+      AND child_member.genealogy_id = ANY(:gids)
+    UNION ALL
+    SELECT m.spouse1_member_id, m.spouse2_member_id, 'spouse'
+    FROM marriages m
+    JOIN members spouse2 ON spouse2.id = m.spouse2_member_id
+    WHERE m.genealogy_id = ANY(:gids)
+      AND m.spouse1_member_id = ANY(:frontier)
+      AND spouse2.genealogy_id = ANY(:gids)
+    UNION ALL
+    SELECT m.spouse2_member_id, m.spouse1_member_id, 'spouse'
+    FROM marriages m
+    JOIN members spouse1 ON spouse1.id = m.spouse1_member_id
+    WHERE m.genealogy_id = ANY(:gids)
+      AND m.spouse2_member_id = ANY(:frontier)
+      AND spouse1.genealogy_id = ANY(:gids)
+"""
+
+
+def _fetch_frontier_neighbors(genealogy_ids, frontier):
+    if not frontier:
+        return []
+    return db.session.execute(
+        text(NEIGHBORS_FOR_FRONTIER_QUERY),
+        {"gids": genealogy_ids, "frontier": list(frontier)},
+    ).mappings().all()
+
+
+def _reverse_relation_label(relation_type):
+    if relation_type == "child":
+        return "parent"
+    return relation_type
+
+
+def _build_path_from_parent_map(parent_map, member_id):
+    ids = [member_id]
+    rels = []
+    current = member_id
+    while parent_map[current][0] is not None:
+        prev_id, relation_type = parent_map[current]
+        ids.insert(0, prev_id)
+        rels.insert(0, relation_type)
+        current = prev_id
+    return ids, rels
+
+
+def _bidirectional_shortest_path(genealogy_ids, start_id, end_id, max_depth=30):
+    """Index-friendly bidirectional BFS.
+
+    The old recursive CTE expands against the full edge set. This version only
+    queries neighbors for the current frontier, which is much faster on 100k+
+    member datasets with low per-member degree.
+    """
+    forward_frontier = {start_id}
+    backward_frontier = {end_id}
+    forward_parent = {start_id: (None, None)}
+    backward_parent = {end_id: (None, None)}
+    forward_depth = {start_id: 0}
+    backward_depth = {end_id: 0}
+
+    for _ in range(max_depth):
+        expand_forward = len(forward_frontier) <= len(backward_frontier)
+        frontier = forward_frontier if expand_forward else backward_frontier
+        own_parent = forward_parent if expand_forward else backward_parent
+        other_parent = backward_parent if expand_forward else forward_parent
+        own_depth = forward_depth if expand_forward else backward_depth
+        other_depth = backward_depth if expand_forward else forward_depth
+        next_frontier = set()
+
+        for row in _fetch_frontier_neighbors(genealogy_ids, frontier):
+            from_id = row["from_id"]
+            to_id = row["to_id"]
+            relation_type = row["relation_type"]
+            if to_id in own_parent:
+                continue
+            if own_depth[from_id] + 1 > max_depth:
+                continue
+
+            own_parent[to_id] = (from_id, relation_type)
+            own_depth[to_id] = own_depth[from_id] + 1
+
+            if to_id in other_parent:
+                meeting_id = to_id
+                left_ids, left_rels = _build_path_from_parent_map(forward_parent, meeting_id)
+                right_ids, right_rels_from_end = _build_path_from_parent_map(backward_parent, meeting_id)
+                right_ids_to_end = right_ids[-2::-1] if len(right_ids) > 1 else []
+                right_rels_to_end = [
+                    _reverse_relation_label(relation_type)
+                    for relation_type in reversed(right_rels_from_end)
+                ]
+                return left_ids + right_ids_to_end, left_rels + right_rels_to_end
+
+            next_frontier.add(to_id)
+
+        if expand_forward:
+            forward_frontier = next_frontier
+        else:
+            backward_frontier = next_frontier
+        if not forward_frontier or not backward_frontier:
+            break
+    return None, None
+
+
 def _reconstruct_path(genealogy_ids, start_id, meeting_id, depth, distances):
     """Phase 2: backtrack from meeting_id to start_id using distances map.
     Does per-step neighbor queries (O(depth) queries, each < 5ms).
@@ -644,76 +759,12 @@ def relationship_path():
     use_sqlite_fallback = _is_sqlite()
     if use_sqlite_fallback:
         full_path_ids, relation_types = _sqlite_shortest_path(genealogy_ids, start_id, end_id)
-
-    # --- Progressive bidirectional BFS ---
-    # Try shallow depths first (fast for common close relations)
-    for max_depth in (() if use_sqlite_fallback else (6, 8, 10, 12, 15)):
-        fwd = _bfs_reachable(genealogy_ids, start_id, max_depth)
-        rev = _bfs_reachable(genealogy_ids, end_id, max_depth)
-        meeting = set(fwd.keys()) & set(rev.keys())
-
-        if meeting:
-            best = min(meeting, key=lambda m: fwd[m] + rev[m])
-            fwd_depth = fwd[best]
-            rev_depth = rev[best]
-
-            # --- Phase 2: reconstruct both halves ---
-            # Python backtracking: O(depth) per-step queries (each < 5ms with indexes)
-            fwd_ids, fwd_rels = _reconstruct_path(genealogy_ids, start_id, best, fwd_depth, fwd)
-            rev_ids, rev_rels = _reconstruct_path(genealogy_ids, end_id, best, rev_depth, rev)
-
-            if fwd_ids and rev_ids:
-                fwd_ids = list(fwd_ids)
-                rev_ids = list(rev_ids)
-                rev_reversed = rev_ids[-2::-1] if len(rev_ids) > 1 else []
-
-                full_path_ids = fwd_ids + rev_reversed
-
-                # Combine relation labels
-                relation_types = list(fwd_rels)
-                rev_rels_list = list(rev_rels)
-                for i in range(len(rev_rels_list) - 1, -1, -1):
-                    rev_rel = rev_rels_list[i]
-                    if rev_rel == "child":
-                        relation_types.append("parent")
-                    elif rev_rel == "spouse":
-                        relation_types.append("spouse")
-                    else:
-                        relation_types.append(rev_rel)
-                break
-
-        if max_depth >= 15:
-            break
-
-    # --- Last resort: legacy single-direction BFS ---
-    if full_path_ids is None:
-        legacy_sql = (
-            "WITH RECURSIVE edges AS NOT MATERIALIZED (" + EDGE_CTE_WITH_REL + "),\n"
-            + "walk AS (\n"
-            + "    SELECT CAST(:start_id AS INTEGER) AS member_id,\n"
-            + "           ',' || CAST(:start_id AS TEXT) || ',' AS id_path,\n"
-            + "           '' AS relation_types,\n"
-            + "           0 AS depth\n"
-            + "    UNION ALL\n"
-            + "    SELECT e.to_id,\n"
-            + "           walk.id_path || CAST(e.to_id AS TEXT) || ',',\n"
-            + "           walk.relation_types || e.relation_type || ',',\n"
-            + "           walk.depth + 1\n"
-            + "    FROM walk\n"
-            + "    JOIN edges e ON e.from_id = walk.member_id\n"
-            + "    WHERE walk.depth < 18\n"
-            + ") CYCLE member_id SET is_cycle USING cycle_path\n"
-            + "SELECT id_path, relation_types FROM walk\n"
-            + "WHERE member_id = :end_id AND NOT is_cycle\n"
-            + "ORDER BY depth LIMIT 1"
+    else:
+        full_path_ids, relation_types = _bidirectional_shortest_path(
+            genealogy_ids,
+            start_id,
+            end_id,
         )
-        row = db.session.execute(
-            text(legacy_sql),
-            {"genealogy_ids": genealogy_ids, "start_id": start_id, "end_id": end_id},
-        ).first()
-        if row:
-            full_path_ids = [int(v) for v in row.id_path.strip(",").split(",") if v]
-            relation_types = [v for v in row.relation_types.strip(",").split(",") if v]
 
     path_members = []
     path_steps = []
